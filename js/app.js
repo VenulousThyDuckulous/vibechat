@@ -29,6 +29,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 // ============ STATE ============
+console.log("VibeChat build: avatars-1");
 let currentUser = null;
 let currentRoom = null;
 let currentRoomId = null;
