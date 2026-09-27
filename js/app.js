@@ -145,7 +145,8 @@ async function handleLogin(e) {
   try {
     await signInWithEmailAndPassword(auth, usernameToEmail(username), password);
   } catch (err) {
-    showError(getAuthErrorMessage(err.code));
+    console.error("Login failed:", err);
+    showError(getAuthErrorMessage(err.code) + (err.code ? ` (${err.code})` : ""));
   }
 }
 
@@ -169,7 +170,8 @@ async function handleSignup(e) {
       createdAt: serverTimestamp()
     });
   } catch (err) {
-    showError(getAuthErrorMessage(err.code));
+    console.error("Signup failed:", err);
+    showError(getAuthErrorMessage(err.code) + (err.code ? ` (${err.code})` : ""));
   }
 }
 
@@ -177,12 +179,17 @@ function getAuthErrorMessage(code) {
   const messages = {
     "auth/user-not-found": "No account found with that username",
     "auth/wrong-password": "Incorrect password",
+    "auth/invalid-credential": "Wrong username or password",
+    "auth/invalid-login-credentials": "Wrong username or password",
     "auth/email-already-in-use": "That username is taken",
     "auth/weak-password": "Password must be at least 6 characters",
     "auth/invalid-email": "Invalid username format",
+    "auth/operation-not-allowed": "Email/password login is not enabled in Firebase Console",
+    "auth/api-key-not-valid": "Firebase API key is invalid — check firebase-config.js",
+    "auth/network-request-failed": "Network error — check your connection",
     "auth/too-many-requests": "Too many attempts. Try again later."
   };
-  return messages[code] || "Something went wrong. Try again.";
+  return messages[code] || `Something went wrong${code ? ": " + code : ""}. Try again.`;
 }
 
 async function loadUserProfile() {
