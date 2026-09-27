@@ -17,14 +17,20 @@ const firebaseConfig = {
   appId: "1:1094675039349:web:64a3a3a22d46d93df2a43c"
 };
 
-// Admin UIDs — add your Firebase Auth UID here for admin access.
-// Find it in Firebase Console → Authentication → Users.
+// Admin UIDs — add Firebase Auth UIDs here for admin access.
+// Find them in Firebase Console → Authentication → Users.
 const ADMIN_UIDS = [
   // "your-admin-uid-here"
+];
+
+// Owner usernames — full access (admin panel + owner badge).
+// Matched case-insensitively against the profile username.
+const OWNER_USERNAMES = [
+  "VenulousRG"
 ];
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
 
-export { app, auth, db, ADMIN_UIDS };
+export { app, auth, db, ADMIN_UIDS, OWNER_USERNAMES };

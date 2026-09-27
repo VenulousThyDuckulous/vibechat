@@ -2,7 +2,7 @@
 //  VibeChat — Main App Module
 // ============================================================
 
-import { auth, db, ADMIN_UIDS } from "./firebase-config.js";
+import { auth, db, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -83,6 +83,10 @@ function clearError() {
 
 function usernameToEmail(username) {
   return `${username.toLowerCase().replace(/[^a-z0-9]/g, "")}@vibechat.app`;
+}
+
+function isOwnerName(name) {
+  return OWNER_USERNAMES.some(o => o.toLowerCase() === (name || "").toLowerCase());
 }
 
 function formatTime(ts) {
@@ -239,6 +243,9 @@ async function loadUserProfile() {
     $("current-username").textContent = localStorage.getItem("vibechat-username") || "user";
     showToast(`Database read failed (${err.code || err.message}) — check rules/URL`, "error");
   }
+
+  // Owners get full access too
+  if (isOwnerName($("current-username").textContent)) isAdmin = true;
 
   // Show admin button if admin
   $("admin-btn").classList.toggle("hidden", !isAdmin);
@@ -459,11 +466,12 @@ function appendMessage(msgId, msg) {
   div.dataset.msgId = msgId;
 
   const isMsgAdmin = ADMIN_UIDS.includes(msg.uid);
+  const isMsgOwner = !isMsgAdmin && isOwnerName(msg.username);
 
   div.innerHTML = `
     <div class="message-header">
       <span class="message-username">${escapeHtml(msg.username)}</span>
-      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""}
+      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
     <div class="message-bubble">${linkify(msg.text)}</div>
@@ -628,13 +636,14 @@ async function loadAdminData() {
     const item = document.createElement("div");
     item.className = "admin-item";
     const userIsAdmin = ADMIN_UIDS.includes(id);
+    const userIsOwner = isOwnerName(data.username);
     item.innerHTML = `
       <div class="admin-item-info">
-        <h5>${escapeHtml(data.username)} ${userIsAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""}</h5>
+        <h5>${escapeHtml(data.username)} ${userIsOwner ? '<span class="message-admin-badge">OWNER</span>' : userIsAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""}</h5>
         <p>UID: ${id.slice(0, 12)}...</p>
       </div>
       <div class="admin-item-actions">
-        ${!userIsAdmin ? `<button class="btn btn-ghost btn-small" onclick="window.__toggleAdmin('${id}', true)">Make Admin</button>` : `<button class="btn btn-ghost btn-small" onclick="window.__toggleAdmin('${id}', false)">Remove Admin</button>`}
+        ${userIsOwner ? "" : !userIsAdmin ? `<button class="btn btn-ghost btn-small" onclick="window.__toggleAdmin('${id}', true)">Make Admin</button>` : `<button class="btn btn-ghost btn-small" onclick="window.__toggleAdmin('${id}', false)">Remove Admin</button>`}
       </div>
     `;
     userList.appendChild(item);
