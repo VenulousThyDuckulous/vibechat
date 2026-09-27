@@ -633,6 +633,13 @@ input::placeholder {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.admin-note {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
 /* ============ MODAL ============ */

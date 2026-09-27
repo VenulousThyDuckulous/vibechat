@@ -772,10 +772,17 @@ async function loadAdminData() {
       actions.appendChild(b);
     };
     // Owner-only powers: banning and managing admins. Admins can moderate content only.
+    // Note: config-file admins (ADMIN_UIDS) can only be revoked by editing the code.
     if (isOwner && !userIsOwner && !isSelf) {
       if (!userIsBanned) addBtn("Ban", "btn-danger", () => window.__banUser(id, data.username));
       else addBtn("Unban", "btn-ghost", () => window.__unbanUser(id));
-      if (!userIsAdmin) addBtn("Make Admin", "btn-ghost", () => window.__toggleAdmin(id, true));
+      if (ADMIN_UIDS.includes(id)) {
+        const note = document.createElement("span");
+        note.className = "admin-note";
+        note.textContent = "Config admin";
+        actions.appendChild(note);
+      }
+      else if (!userIsAdmin) addBtn("Make Admin", "btn-ghost", () => window.__toggleAdmin(id, true));
       else addBtn("Remove Admin", "btn-ghost", () => window.__toggleAdmin(id, false));
     }
     item.appendChild(actions);
