@@ -2,7 +2,7 @@
 //  VibeChat — Main App Module
 // ============================================================
 
-import { auth, db, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
+import { auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -27,12 +27,19 @@ import {
   limitToLast,
   off
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 // ============ STATE ============
 let currentUser = null;
 let currentRoom = null;
 let currentRoomId = null;
 let isAdmin = false;
+let isOwner = false;
+let isBanned = false;
 let presenceRef = null;
 let typingRef = null;
 let messageListeners = [];
@@ -123,8 +130,16 @@ function initAuth() {
       isAdmin = ADMIN_UIDS.includes(user.uid);
       loadUserProfile();
     } else {
+      detachActiveListeners();
+      if (presenceRef && currentUser) {
+        try { remove(presenceRef); } catch (e) {}
+      }
+      presenceRef = null;
+      typingRef = null;
       currentUser = null;
       isAdmin = false;
+      isOwner = false;
+      isBanned = false;
       currentRoom = null;
       currentRoomId = null;
       showScreen("auth");
@@ -245,7 +260,44 @@ async function loadUserProfile() {
   }
 
   // Owners get full access too
-  if (isOwnerName($("current-username").textContent)) isAdmin = true;
+  isOwner = isOwnerName($("current-username").textContent);
+  if (isOwner) isAdmin = true;
+
+  // Banned? (owners can't be banned)
+  if (!isOwner) {
+    try {
+      const banSnap = await get(ref(db, `banned/${currentUser.uid}`));
+      if (banSnap.exists()) {
+        isBanned = true;
+        await signOut(auth);
+        showError("This account has been banned.");
+        return;
+      }
+    } catch (err) {
+      console.error("Ban check failed:", err);
+    }
+  }
+  isBanned = false;
+
+  // DB-backed admins — this is what the panel's Make Admin grants
+  if (!isAdmin) {
+    try {
+      const adminSnap = await get(ref(db, `admins/${currentUser.uid}`));
+      if (adminSnap.val() === true) isAdmin = true;
+    } catch (err) {
+      console.error("Admin check failed:", err);
+    }
+  }
+
+  // Live ban enforcement — get kicked even mid-session
+  const myBanRef = ref(db, `banned/${currentUser.uid}`);
+  const myBanCb = (snap) => {
+    if (snap.exists() && !isOwner) {
+      signOut(auth).then(() => showError("This account has been banned."));
+    }
+  };
+  onValue(myBanRef, myBanCb);
+  trackListener(myBanRef, "value", myBanCb);
 
   // Show admin button if admin
   $("admin-btn").classList.toggle("hidden", !isAdmin);
@@ -474,7 +526,7 @@ function appendMessage(msgId, msg) {
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
-    <div class="message-bubble">${linkify(msg.text)}</div>
+    <div class="message-bubble">${linkify(msg.text || "")}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
   `;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
@@ -516,6 +568,10 @@ function setupTyping(roomId) {
 function initChat() {
   $("message-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (isBanned) {
+      showToast("You are banned", "error");
+      return;
+    }
     const input = $("message-input");
     const text = input.value.trim();
     if (!text || !currentRoomId) return;
@@ -530,6 +586,49 @@ function initChat() {
 
     input.value = "";
     if (typingRef) remove(typingRef);
+  });
+
+  // File/image attachments via Firebase Storage
+  $("attach-btn").addEventListener("click", () => $("file-input").click());
+  $("file-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file || !currentRoomId) return;
+    if (isBanned) {
+      showToast("You are banned", "error");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("File must be under 5MB", "error");
+      return;
+    }
+
+    const sendBtn = $("send-btn");
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Uploading…";
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+      const sRef = storageRef(storage, `chat-files/${currentRoomId}/${Date.now()}_${safeName}`);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+      const isImage = file.type.startsWith("image/");
+      const caption = $("message-input").value.trim();
+      await push(ref(db, `rooms/${currentRoomId}/messages`), {
+        uid: currentUser.uid,
+        username: getUsername(),
+        text: caption || (isImage ? "📷 Image" : `📎 ${file.name}`),
+        ...(isImage ? { imageUrl: url } : { fileUrl: url, fileName: file.name }),
+        timestamp: serverTimestamp()
+      });
+      $("message-input").value = "";
+      if (typingRef) remove(typingRef);
+    } catch (err) {
+      console.error("Upload failed:", err);
+      showToast("Upload failed — is Firebase Storage enabled?", "error");
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = "Send";
+    }
   });
 }
 
@@ -629,6 +728,8 @@ async function loadAdminData() {
   // Load all users
   const usersSnap = await get(ref(db, "users"));
   const users = usersSnap.val() || {};
+  const bannedSnap = await get(ref(db, "banned"));
+  const banned = bannedSnap.val() || {};
   const userList = $("admin-user-list");
   userList.innerHTML = "";
 
@@ -637,15 +738,32 @@ async function loadAdminData() {
     item.className = "admin-item";
     const userIsAdmin = ADMIN_UIDS.includes(id);
     const userIsOwner = isOwnerName(data.username);
-    item.innerHTML = `
-      <div class="admin-item-info">
-        <h5>${escapeHtml(data.username)} ${userIsOwner ? '<span class="message-admin-badge">OWNER</span>' : userIsAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""}</h5>
-        <p>UID: ${id.slice(0, 12)}...</p>
-      </div>
-      <div class="admin-item-actions">
-        ${userIsOwner ? "" : !userIsAdmin ? `<button class="btn btn-ghost btn-small" onclick="window.__toggleAdmin('${id}', true)">Make Admin</button>` : `<button class="btn btn-ghost btn-small" onclick="window.__toggleAdmin('${id}', false)">Remove Admin</button>`}
-      </div>
-    `;
+    const userIsBanned = !!banned[id];
+    const isSelf = id === currentUser.uid;
+
+    const info = document.createElement("div");
+    info.className = "admin-item-info";
+    const badges = `${userIsOwner ? '<span class="message-admin-badge">OWNER</span>' : userIsAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""} ${userIsBanned ? '<span class="message-admin-badge">BANNED</span>' : ""}`;
+    info.innerHTML = `<h5>${escapeHtml(data.username)} ${badges}</h5><p>UID: ${escapeHtml(id.slice(0, 12))}...</p>`;
+    item.appendChild(info);
+
+    const actions = document.createElement("div");
+    actions.className = "admin-item-actions";
+    const addBtn = (label, cls, fn) => {
+      const b = document.createElement("button");
+      b.className = `btn ${cls} btn-small`;
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      actions.appendChild(b);
+    };
+    // Owner-only powers: banning and managing admins. Admins can moderate content only.
+    if (isOwner && !userIsOwner && !isSelf) {
+      if (!userIsBanned) addBtn("Ban", "btn-danger", () => window.__banUser(id, data.username));
+      else addBtn("Unban", "btn-ghost", () => window.__unbanUser(id));
+      if (!userIsAdmin) addBtn("Make Admin", "btn-ghost", () => window.__toggleAdmin(id, true));
+      else addBtn("Remove Admin", "btn-ghost", () => window.__toggleAdmin(id, false));
+    }
+    item.appendChild(actions);
     userList.appendChild(item);
   });
 
@@ -688,7 +806,10 @@ window.__deleteRoom = async (roomId) => {
 };
 
 window.__toggleAdmin = async (uid, makeAdmin) => {
-  const adminsRef = ref(db, "admins");
+  if (!isOwner) {
+    showToast("Only the owner can manage admins", "error");
+    return;
+  }
   if (makeAdmin) {
     await set(ref(db, `admins/${uid}`), true);
     showToast("User is now admin");
@@ -696,6 +817,31 @@ window.__toggleAdmin = async (uid, makeAdmin) => {
     await remove(ref(db, `admins/${uid}`));
     showToast("Admin removed");
   }
+  loadAdminData();
+};
+
+window.__banUser = async (uid, username) => {
+  if (!isOwner) {
+    showToast("Only the owner can ban users", "error");
+    return;
+  }
+  if (!confirm(`Ban ${username}? They will be signed out and blocked from coming back.`)) return;
+  await set(ref(db, `banned/${uid}`), {
+    username: username,
+    bannedBy: getUsername(),
+    bannedAt: serverTimestamp()
+  });
+  showToast(`${username} banned`);
+  loadAdminData();
+};
+
+window.__unbanUser = async (uid) => {
+  if (!isOwner) {
+    showToast("Only the owner can unban users", "error");
+    return;
+  }
+  await remove(ref(db, `banned/${uid}`));
+  showToast("User unbanned");
   loadAdminData();
 };
 

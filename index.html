@@ -97,8 +97,10 @@
         <div id="messages" class="messages"></div>
         <div id="typing-indicator" class="typing-indicator hidden"></div>
         <form id="message-form" class="message-form">
+          <button type="button" id="attach-btn" class="attach-btn" title="Attach image or file">📎</button>
+          <input type="file" id="file-input" class="hidden" />
           <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" maxlength="500" />
-          <button type="submit" class="btn btn-primary">Send</button>
+          <button type="submit" id="send-btn" class="btn btn-primary">Send</button>
         </form>
       </main>
     </div>

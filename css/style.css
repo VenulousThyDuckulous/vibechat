@@ -506,6 +506,55 @@ input::placeholder {
   flex: 1;
 }
 
+.attach-btn {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.attach-btn:hover {
+  background: var(--bg-hover);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.message-image {
+  display: block;
+  max-width: 280px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.file-link {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.message.own .file-link {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.file-link:hover {
+  text-decoration: underline;
+}
+
 /* ============ ADMIN PANEL ============ */
 .admin-container {
   display: flex;
