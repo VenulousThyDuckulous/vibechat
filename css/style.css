@@ -594,13 +594,6 @@ input::placeholder {
   padding: 16px 8px;
 }
 
-.gif-attrib {
-  font-size: 0.7rem;
-  color: var(--text-muted);
-  text-align: right;
-  margin-top: 6px;
-}
-
 .btn:disabled {
   opacity: 0.6;
   cursor: wait;

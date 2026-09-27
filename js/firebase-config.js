@@ -30,14 +30,13 @@ const OWNER_USERNAMES = [
   "VenulousRG"
 ];
 
-// Tenor API key for GIF search — get a free one at:
-// https://developers.google.com/tenor/guides/quickstart
-// Until this is set, the GIF button shows a setup hint.
-const TENOR_API_KEY = "YOUR_TENOR_KEY";
+// Reaction GIFs live in Firebase Storage under reaction-gifs/.
+// The owner uploads them once via Firebase Console → Storage.
+// Everyone can then browse and send them from the 🎬 picker.
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
 const storage = getStorage(app);
 
-export { app, auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES, TENOR_API_KEY };
+export { app, auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES };

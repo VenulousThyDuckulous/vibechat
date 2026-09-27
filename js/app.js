@@ -2,7 +2,7 @@
 //  VibeChat — Main App Module
 // ============================================================
 
-import { auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES, TENOR_API_KEY } from "./firebase-config.js";
+import { auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -30,7 +30,8 @@ import {
 import {
   ref as storageRef,
   uploadBytesResumable,
-  getDownloadURL
+  getDownloadURL,
+  listAll
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 // ============ STATE ============
@@ -698,7 +699,7 @@ function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {
   overlay.classList.remove("hidden");
 }
 
-// ============ GIF PICKER (TENOR) ============
+// ============ GIF PICKER (SELF-HOSTED REACTIONS) ============
 function toggleGifPicker() {
   let picker = document.querySelector(".gif-picker");
   if (picker) {
@@ -713,7 +714,6 @@ function toggleGifPicker() {
       <input type="text" id="gif-search" placeholder="Search GIFs..." autocomplete="off" />
     </div>
     <div class="gif-grid"></div>
-    <div class="gif-attrib">Powered by Tenor</div>
   `;
   document.querySelector(".chat-main").appendChild(picker);
 
@@ -735,37 +735,34 @@ function toggleGifPicker() {
 }
 
 async function loadGifs(grid, q) {
-  if (!TENOR_API_KEY || TENOR_API_KEY === "YOUR_TENOR_KEY") {
-    grid.innerHTML = '<p class="gif-status">GIFs need a Tenor API key — ask the owner to add one.</p>';
-    return;
-  }
   grid.innerHTML = '<p class="gif-status">Loading…</p>';
   try {
-    const endpoint = q
-      ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${TENOR_API_KEY}&limit=20&media_filter=tinygif,gif`
-      : `https://tenor.googleapis.com/v2/featured?key=${TENOR_API_KEY}&limit=12&media_filter=tinygif,gif`;
-    const res = await fetch(endpoint);
-    if (!res.ok) throw new Error(`Tenor ${res.status}`);
-    const data = await res.json();
+    const listing = await listAll(storageRef(storage, "reaction-gifs"));
+    const query = (q || "").toLowerCase();
+    const gifs = [];
+    for (const item of listing.items) {
+      if (query && !item.name.toLowerCase().includes(query)) continue;
+      gifs.push({ name: item.name, url: await getDownloadURL(item) });
+    }
     grid.innerHTML = "";
-    if (!data.results?.length) {
-      grid.innerHTML = '<p class="gif-status">No GIFs found.</p>';
+    if (!gifs.length) {
+      grid.innerHTML = query
+        ? '<p class="gif-status">No GIFs match that search.</p>'
+        : '<p class="gif-status">No GIFs yet — the owner can add some in Firebase Console → Storage → reaction-gifs/.</p>';
       return;
     }
-    data.results.forEach(r => {
-      const tiny = r.media_formats?.tinygif?.url;
-      const full = r.media_formats?.gif?.url || tiny;
-      if (!tiny) return;
+    gifs.forEach(g => {
       const img = document.createElement("img");
-      img.src = tiny;
+      img.src = g.url;
       img.loading = "lazy";
-      img.alt = r.content_description || "GIF";
-      img.addEventListener("click", () => sendGif(full));
+      img.alt = g.name;
+      img.title = g.name;
+      img.addEventListener("click", () => sendGif(g.url));
       grid.appendChild(img);
     });
   } catch (err) {
     console.error("GIF load failed:", err);
-    grid.innerHTML = '<p class="gif-status">Could not load GIFs. Try again.</p>';
+    grid.innerHTML = `<p class="gif-status">Could not load GIFs (${err.code || err.message}). The owner may need to allow reading reaction-gifs in Storage rules.</p>`;
   }
 }
 
