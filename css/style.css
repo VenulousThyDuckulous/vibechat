@@ -648,6 +648,19 @@ input::placeholder {
   flex-shrink: 0;
 }
 
+.room-card.announcements {
+  border-left: 3px solid var(--warning);
+}
+
+.readonly-notice {
+  padding: 12px 20px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--warning);
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
 .mention-badge {
   background: var(--warning);
   color: #000;

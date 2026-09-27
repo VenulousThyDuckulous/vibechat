@@ -45,6 +45,30 @@ let userCache = {};
 let mentionCounts = {};
 let currentPresence = {};
 let mentionMenuState = { open: false, items: [], highlight: 0 };
+
+const ANNOUNCEMENTS_ID = "announcements";
+
+// System room: pinned to the top, everyone can read, only the owner posts.
+// Auto-created on first load (identical data from every client, so races are harmless).
+async function ensureAnnouncementsRoom() {
+  try {
+    const snap = await get(ref(db, `rooms/${ANNOUNCEMENTS_ID}`));
+    if (!snap.exists()) {
+      await set(ref(db, `rooms/${ANNOUNCEMENTS_ID}`), {
+        name: "📢 Announcements",
+        createdBy: "system",
+        createdByName: "VibeChat",
+        createdAt: serverTimestamp(),
+        isPrivate: false,
+        passwordHash: null,
+        memberCount: 0,
+        system: true
+      });
+    }
+  } catch (err) {
+    console.error("Announcements bootstrap failed:", err);
+  }
+}
 let presenceRef = null;
 let typingRef = null;
 let messageListeners = [];
@@ -596,6 +620,7 @@ async function loadUserProfile() {
   // Show admin button if admin
   $("admin-btn").classList.toggle("hidden", !isAdmin);
 
+  await ensureAnnouncementsRoom();
   showScreen("lobby");
   loadRooms();
 }
@@ -656,6 +681,7 @@ function addRoomToList(roomId, data) {
   const list = $("room-list");
   const empty = list.querySelector(".empty-state");
   if (empty) empty.remove();
+  if (list.querySelector(`[data-room-id="${roomId}"]`)) return;
 
   const card = document.createElement("div");
   card.className = "room-card";
@@ -667,11 +693,16 @@ function addRoomToList(roomId, data) {
     </div>
     <div class="room-badges">
       <span class="mention-badge hidden"></span>
-      <span class="room-card-badge ${data.isPrivate ? "private" : ""}">${data.isPrivate ? "🔒" : "🌍"}</span>
+      <span class="room-card-badge ${data.isPrivate ? "private" : ""}">${roomId === ANNOUNCEMENTS_ID ? "📌" : data.isPrivate ? "🔒" : "🌍"}</span>
     </div>
   `;
   card.addEventListener("click", () => handleJoinRoom(roomId, data));
-  list.appendChild(card);
+  if (roomId === ANNOUNCEMENTS_ID) {
+    card.classList.add("announcements");
+    list.prepend(card);
+  } else {
+    list.appendChild(card);
+  }
   updateMentionBadges();
 }
 
@@ -733,9 +764,13 @@ async function joinRoom(roomId, data) {
   currentRoomId = roomId;
   currentRoom = data;
   $("chat-room-name").textContent = data.name;
-  // Only the creator (or an admin) can close the room
-  const canClose = currentUser.uid === data.createdBy || isAdmin;
+  // Only the creator (or an admin) can close the room — never the system room
+  const canClose = (currentUser.uid === data.createdBy || isAdmin) && roomId !== ANNOUNCEMENTS_ID;
   $("close-room-btn").classList.toggle("hidden", !canClose);
+  // Announcements is read-only for everyone except the owner
+  const readOnly = roomId === ANNOUNCEMENTS_ID && !isOwner;
+  $("message-form").classList.toggle("hidden", readOnly);
+  $("readonly-notice").classList.toggle("hidden", !readOnly);
   showScreen("chat");
   await refreshUserCache();
   // Opening the room marks its mentions as read
@@ -774,6 +809,8 @@ function leaveRoom() {
   currentRoom = null;
   currentRoomId = null;
   $("messages").innerHTML = "";
+  $("message-form").classList.remove("hidden");
+  $("readonly-notice").classList.add("hidden");
   showScreen("lobby");
   loadRooms();
 }
@@ -927,6 +964,7 @@ function initChat() {
       showToast("You are banned", "error");
       return;
     }
+    if (currentRoomId === ANNOUNCEMENTS_ID && !isOwner) return;
     const input = $("message-input");
     const text = input.value.trim();
     if (!text || !currentRoomId) return;
@@ -1223,8 +1261,8 @@ async function loadAdminData() {
         <p>By ${escapeHtml(data.createdByName || "unknown")} · ${data.isPrivate ? "🔒 Private" : "🌍 Public"} · ${data.memberCount || 0} members</p>
       </div>
       <div class="admin-item-actions">
-        <button class="btn btn-ghost btn-small" onclick="window.__viewRoom('${id}')">View</button>
-        <button class="btn btn-danger btn-small" onclick="window.__deleteRoom('${id}')">Delete</button>
+        ${id === ANNOUNCEMENTS_ID ? '<span class="admin-note">System room</span>' : `<button class="btn btn-ghost btn-small" onclick="window.__viewRoom('${id}')">View</button>
+        <button class="btn btn-danger btn-small" onclick="window.__deleteRoom('${id}')">Delete</button>`}
       </div>
     `;
     roomList.appendChild(item);
