@@ -9,7 +9,6 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  updateEmail,
   updatePassword,
   reauthenticateWithCredential,
   EmailAuthProvider
@@ -93,7 +92,30 @@ function clearError() {
 }
 
 function usernameToEmail(username) {
-  return `${username.toLowerCase().replace(/[^a-z0-9]/g, "")}@vibechat.app`;
+  return `${normalizeName(username)}@vibechat.app`;
+}
+
+function normalizeName(username) {
+  return (username || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// Display names live in users/{uid} + usernames/{key}; the Auth email
+// (built from the ORIGINAL signup name) never changes, so renames are
+// database-only and can't hit Firebase's email-change restrictions.
+async function ensureUsernameIndex(key, uid) {
+  if (!key) return;
+  try {
+    const snap = await get(ref(db, `usernames/${key}`));
+    const hit = snap.val();
+    const owner = typeof hit === "string" ? hit : hit?.uid;
+    if (!snap.exists() || owner === uid) {
+      await set(ref(db, `usernames/${key}`), uid);
+    } else {
+      console.warn("Username index collision, skipping:", key);
+    }
+  } catch (err) {
+    console.error("Username index backfill failed:", err);
+  }
 }
 
 function isOwnerName(name) {
@@ -236,19 +258,44 @@ async function handleLogin(e) {
   clearError();
   const username = $("login-username").value.trim();
   const password = $("login-password").value;
+  if (!username) {
+    showError("Enter your username");
+    return;
+  }
 
+  let user = null;
   try {
-    const cred = await signInWithEmailAndPassword(auth, usernameToEmail(username), password);
-    localStorage.setItem("vibechat-username", username);
-    // Backfill profile if signup's DB write previously failed
     try {
-      const snap = await get(ref(db, `users/${cred.user.uid}`));
-      if (!snap.exists()) {
-        await set(ref(db, `users/${cred.user.uid}`), {
-          username: username,
-          createdAt: serverTimestamp()
-        });
-      }
+      // Usual path: typed name maps directly to the login email
+      // (original signup name, or pre-rename account).
+      user = (await signInWithEmailAndPassword(auth, usernameToEmail(username), password)).user;
+      localStorage.setItem("vibechat-username", username);
+    } catch (legacyErr) {
+      if (!["auth/invalid-credential", "auth/invalid-login-credentials", "auth/user-not-found", "auth/wrong-password"].includes(legacyErr.code)) throw legacyErr;
+      // Maybe a renamed display name — resolve via the username index.
+      const key = normalizeName(username);
+      if (!key) throw legacyErr;
+      const idxSnap = await get(ref(db, `usernames/${key}`));
+      const hit = idxSnap.val();
+      const uid = typeof hit === "string" ? hit : hit?.uid;
+      const profSnap = uid ? await get(ref(db, `users/${uid}`)) : null;
+      const login = profSnap?.val()?.login;
+      if (!uid || !login) throw legacyErr;
+      user = (await signInWithEmailAndPassword(auth, `${login}@vibechat.app`, password)).user;
+      localStorage.setItem("vibechat-username", profSnap.val()?.username || username);
+    }
+    // Backfill profile + index if signup's DB writes previously failed
+    try {
+      const profRef = ref(db, `users/${user.uid}`);
+      const snap = await get(profRef);
+      const cur = snap.val() || {};
+      const storedName = cur.username || localStorage.getItem("vibechat-username") || username;
+      await update(profRef, {
+        username: storedName,
+        login: cur.login || normalizeName(username),
+        ...(cur.createdAt ? {} : { createdAt: serverTimestamp() })
+      });
+      await ensureUsernameIndex(normalizeName(storedName), user.uid);
     } catch (dbErr) {
       console.error("Profile backfill failed:", dbErr);
     }
@@ -270,15 +317,32 @@ async function handleSignup(e) {
     return;
   }
 
+  if (username.length < 3 || username.length > 20) {
+    showError("Username must be 3–20 characters");
+    return;
+  }
+  const key = normalizeName(username);
+  if (!key) {
+    showError("Username needs at least one letter or number");
+    return;
+  }
+
   try {
+    const taken = await get(ref(db, `usernames/${key}`));
+    if (taken.exists()) {
+      showError("That username is taken");
+      return;
+    }
     const cred = await createUserWithEmailAndPassword(auth, usernameToEmail(username), password);
     localStorage.setItem("vibechat-username", username);
     // Store username in DB — don't block signup if this fails
     try {
       await set(ref(db, `users/${cred.user.uid}`), {
         username: username,
+        login: key,
         createdAt: serverTimestamp()
       });
+      await set(ref(db, `usernames/${key}`), cred.user.uid);
     } catch (dbErr) {
       console.error("Profile save failed:", dbErr);
       showError(`Account created but profile save failed (${dbErr.code || dbErr.message}). Check database rules/URL.`);
@@ -318,8 +382,10 @@ async function loadUserProfile() {
         try {
           await set(ref(db, `users/${currentUser.uid}`), {
             username: username,
+            login: normalizeName(username),
             createdAt: serverTimestamp()
           });
+          await ensureUsernameIndex(normalizeName(username), currentUser.uid);
           localStorage.setItem("vibechat-username", username);
         } catch (err) {
           console.error("Profile repair failed:", err);
@@ -723,7 +789,6 @@ function openProfileModal() {
     <div class="profile-section">
       <h4>Change username</h4>
       <input type="text" id="profile-username" maxlength="20" placeholder="New username" autocomplete="off" />
-      <input type="password" id="profile-username-pw" placeholder="Current password" autocomplete="current-password" />
       <button id="profile-username-save" class="btn btn-primary btn-small">Change Username</button>
     </div>
     <div class="profile-section">
@@ -796,7 +861,6 @@ async function saveProfileAvatar() {
 
 async function changeUsername() {
   const newName = $("profile-username").value.trim();
-  const currentPw = $("profile-username-pw").value;
   if (!newName) return;
   if (newName === getUsername()) {
     showToast("That's already your username", "error");
@@ -806,26 +870,29 @@ async function changeUsername() {
     showToast("Username must be 3–20 characters", "error");
     return;
   }
-  if (!currentPw) {
-    showToast("Enter your current password to confirm", "error");
+  const newKey = normalizeName(newName);
+  if (!newKey) {
+    showToast("Username needs at least one letter or number", "error");
     return;
   }
+  const oldKey = normalizeName(getUsername());
   try {
-    await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, currentPw));
-    await updateEmail(currentUser, usernameToEmail(newName));
-  } catch (err) {
-    console.error("Username change failed:", err);
-    showToast(
-      err.code === "auth/wrong-password" || err.code === "auth/invalid-credential" ? "Current password is wrong"
-      : err.code === "auth/email-already-in-use" ? "That username is taken"
-      : `Could not change username (${err.code || err.message})`, "error");
-    return;
-  }
-  try {
+    if (newKey !== oldKey) {
+      const taken = await get(ref(db, `usernames/${newKey}`));
+      const hit = taken.val();
+      const owner = typeof hit === "string" ? hit : hit?.uid;
+      if (taken.exists() && owner !== currentUser.uid) {
+        showToast("That username is taken", "error");
+        return;
+      }
+      await set(ref(db, `usernames/${newKey}`), currentUser.uid);
+      await remove(ref(db, `usernames/${oldKey}`));
+    }
     await update(ref(db, `users/${currentUser.uid}`), { username: newName });
   } catch (err) {
-    console.error("Username profile save failed:", err);
-    showToast(`Login name changed but profile save failed (${err.code})`, "error");
+    console.error("Username change failed:", err);
+    showToast(`Could not change username (${err.code || err.message})`, "error");
+    return;
   }
   localStorage.setItem("vibechat-username", newName);
   if (userCache[currentUser.uid]) userCache[currentUser.uid].username = newName;
@@ -836,7 +903,7 @@ async function changeUsername() {
   paintHeaderAvatar();
   paintAvatars(currentUser.uid);
   $("modal-overlay").classList.add("hidden");
-  showToast(`Username changed to ${newName}`);
+  showToast(`Username changed to ${newName} — you can log in with either name`);
 }
 
 async function changePassword() {
