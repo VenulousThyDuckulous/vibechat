@@ -1,0 +1,35 @@
+name: Push notifications poller
+
+# Free "server": checks for undelivered mentions/announcements every
+# 5 minutes and sends FCM web push. Needs the FIREBASE_SERVICE_ACCOUNT
+# repo secret (Firebase Console → Project settings → Service accounts →
+# Generate new private key → paste the whole JSON).
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm init -y && npm install google-auth-library
+        working-directory: .github/scripts
+
+      - name: Send pending pushes
+        run: node notify.mjs
+        working-directory: .github/scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

@@ -2,7 +2,7 @@
 //  VibeChat — Main App Module
 // ============================================================
 
-import { auth, db, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
+import { auth, db, ADMIN_UIDS, OWNER_USERNAMES, VAPID_KEY } from "./firebase-config.js";
 import { initGames, closeGame } from "./games.js";
 import {
   signInWithEmailAndPassword,
@@ -644,6 +644,7 @@ async function loadUserProfile() {
   loadRooms();
   updateAnnouncementsBadge();
   startNotifListeners();
+  if (notifEnabled()) registerPushToken();
 }
 
 $("logout-btn").addEventListener("click", async () => {
@@ -1652,6 +1653,7 @@ async function enableNotifications() {
   localStorage.setItem("vibechat-notif-enabled", "1");
   paintBell();
   showToast("Notifications on");
+  registerPushToken();
 }
 
 function toggleNotifications() {
@@ -1666,7 +1668,13 @@ function toggleNotifications() {
   const on = notifEnabled();
   localStorage.setItem("vibechat-notif-enabled", on ? "0" : "1");
   paintBell();
-  showToast(on ? "Notifications muted" : "Notifications on");
+  if (!on) {
+    showToast("Notifications on");
+    registerPushToken();
+  } else {
+    showToast("Notifications muted");
+    if (currentUser) update(ref(db, `users/${currentUser.uid}`), { notifyEnabled: false }).catch(() => {});
+  }
 }
 
 function handleMentionEvent(roomId, msgs) {
@@ -1733,6 +1741,28 @@ function stopNotifListeners() {
   notifListeners = [];
   notifStarted = false;
   notifiedKeys = new Set();
+}
+
+// Registers this device for closed-browser push (FCM token → RTDB).
+// Needs VAPID_KEY set in firebase-config.js. Safe to call repeatedly.
+async function registerPushToken() {
+  try {
+    if (!("serviceWorker" in navigator) || !("Notification" in window)) return;
+    if (!VAPID_KEY || VAPID_KEY === "YOUR_VAPID_KEY") return;
+    if (!currentUser || Notification.permission !== "granted") return;
+    const { getMessaging, getToken } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js");
+    const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+    const token = await getToken(getMessaging(), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) return;
+    const snap = await get(ref(db, `pushTokens/${currentUser.uid}`));
+    const exists = Object.values(snap.val() || {}).some(t => t.token === token);
+    if (!exists) {
+      await push(ref(db, `pushTokens/${currentUser.uid}`), { token, at: serverTimestamp() });
+    }
+    await update(ref(db, `users/${currentUser.uid}`), { notifyEnabled: true });
+  } catch (err) {
+    console.error("Push token registration failed:", err);
+  }
 }
 
 function initNotifications() {
