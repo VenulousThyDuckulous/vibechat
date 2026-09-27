@@ -419,6 +419,7 @@ function initAuth() {
       loadUserProfile();
     } else {
       detachActiveListeners();
+      stopNotifListeners();
       closeAnnListeners();
       if (presenceRef && currentUser) {
         try { remove(presenceRef); } catch (e) {}
@@ -642,6 +643,7 @@ async function loadUserProfile() {
   showScreen("lobby");
   loadRooms();
   updateAnnouncementsBadge();
+  startNotifListeners();
 }
 
 $("logout-btn").addEventListener("click", async () => {
@@ -716,6 +718,7 @@ function addRoomToList(roomId, data) {
     </div>
   `;
   card.addEventListener("click", () => handleJoinRoom(roomId, data));
+  roomCache[roomId] = data;
   list.appendChild(card);
   updateMentionBadges();
 }
@@ -723,6 +726,7 @@ function addRoomToList(roomId, data) {
 function removeRoomFromList(roomId) {
   const card = document.querySelector(`[data-room-id="${roomId}"]`);
   if (card) card.remove();
+  delete roomCache[roomId];
   const list = $("room-list");
   if (list && !list.children.length) {
     list.innerHTML = '<p class="empty-state">No rooms yet — create one!</p>';
@@ -989,6 +993,7 @@ function initChat() {
       for (const uid of extractMentionedUids(text, isOwner)) {
         await set(ref(db, `mentions/${uid}/${currentRoomId}/${msgRef.key}`), {
           by: getUsername(),
+          text: text.slice(0, 120),
           at: serverTimestamp()
         });
       }
@@ -1577,6 +1582,7 @@ function initAnnouncements() {
       await Promise.all(extractMentionedUids(text, isOwner).map(uid =>
         set(ref(db, `mentions/${uid}/announcements/${annRef.key}`), {
           by: getUsername(),
+          text: text.slice(0, 120),
           at: serverTimestamp()
         })
       ));
@@ -1585,6 +1591,161 @@ function initAnnouncements() {
     }
     input.value = "";
   });
+}
+
+// ============ BROWSER NOTIFICATIONS ============
+// Foreground only (true background push needs a server). Fires for
+// mentions and announcements while the app is open, even in another tab.
+let notifListeners = [];
+let notifStarted = false;
+let notifiedKeys = new Set();
+let roomCache = {};
+
+function notifSupported() {
+  return "Notification" in window;
+}
+
+function notifEnabled() {
+  return notifSupported() && Notification.permission === "granted" &&
+    localStorage.getItem("vibechat-notif-enabled") === "1";
+}
+
+function paintBell() {
+  const bell = $("notif-bell");
+  if (!bell) return;
+  const on = notifEnabled();
+  bell.textContent = on ? "🔔" : "🔕";
+  bell.title = !notifSupported() ? "Notifications not supported in this browser"
+    : Notification.permission === "denied" ? "Notifications blocked — allow them in browser site settings"
+    : on ? "Notifications on (click to mute)" : "Notifications off (click to enable)";
+}
+
+function pushNotify(title, body, onClick) {
+  if (!notifEnabled()) return;
+  try {
+    const n = new Notification(title, { body: body || "" });
+    n.onclick = () => {
+      window.focus();
+      try { if (onClick) onClick(); } catch (e) {}
+      n.close();
+    };
+  } catch (err) {
+    console.error("Notify failed:", err);
+  }
+}
+
+async function enableNotifications() {
+  if (!notifSupported()) {
+    showToast("This browser doesn't support notifications", "error");
+    return;
+  }
+  if (Notification.permission === "denied") {
+    showToast("Notifications are blocked — allow them in browser site settings", "error");
+    return;
+  }
+  if (Notification.permission === "default") {
+    const res = await Notification.requestPermission();
+    localStorage.setItem("vibechat-notif-asked", "1");
+    $("notif-banner").classList.add("hidden");
+    if (res !== "granted") return;
+  }
+  localStorage.setItem("vibechat-notif-enabled", "1");
+  paintBell();
+  showToast("Notifications on");
+}
+
+function toggleNotifications() {
+  if (!notifSupported()) {
+    showToast("This browser doesn't support notifications", "error");
+    return;
+  }
+  if (Notification.permission !== "granted") {
+    enableNotifications();
+    return;
+  }
+  const on = notifEnabled();
+  localStorage.setItem("vibechat-notif-enabled", on ? "0" : "1");
+  paintBell();
+  showToast(on ? "Notifications muted" : "Notifications on");
+}
+
+function handleMentionEvent(roomId, msgs) {
+  const keys = Object.keys(msgs || {});
+  const fresh = keys.filter(k => !notifiedKeys.has(`${roomId}/${k}`));
+  fresh.forEach(k => notifiedKeys.add(`${roomId}/${k}`));
+  if (!fresh.length) return;
+  const latestKey = fresh.sort().pop();
+  const m = msgs[latestKey];
+  if (!m) return;
+  const viewingChat = screens.chat.classList.contains("active") && currentRoomId === roomId;
+  const viewingAnn = screens.announcements.classList.contains("active") && roomId === "announcements";
+  if (viewingChat || viewingAnn) return;
+  if (roomId === "announcements") {
+    pushNotify("📢 Announcement", `${m.by}: ${m.text || ""}`, () => openAnnouncements());
+  } else {
+    const roomName = (roomCache[roomId] || {}).name || "a room";
+    pushNotify("🔔 You were mentioned", `${m.by} in ${roomName}: ${m.text || ""}`, () => {
+      const data = roomCache[roomId];
+      if (data) handleJoinRoom(roomId, data);
+    });
+  }
+}
+
+async function startNotifListeners() {
+  if (notifStarted || !currentUser) return;
+  notifStarted = true;
+  notifiedKeys = new Set();
+  try {
+    const [menSnap, annSnap] = await Promise.all([
+      get(ref(db, `mentions/${currentUser.uid}`)),
+      get(query(ref(db, "announcements/messages"), orderByChild("timestamp"), limitToLast(30)))
+    ]);
+    const men = menSnap.val() || {};
+    for (const [roomId, msgs] of Object.entries(men)) {
+      Object.keys(msgs || {}).forEach(k => notifiedKeys.add(`${roomId}/${k}`));
+    }
+    Object.keys(annSnap.val() || {}).forEach(k => notifiedKeys.add(`ann/${k}`));
+  } catch (err) {
+    /* offline — listeners still attach below */
+  }
+  const menRef = ref(db, `mentions/${currentUser.uid}`);
+  const menAdded = (snap) => handleMentionEvent(snap.key, snap.val());
+  const menChanged = (snap) => handleMentionEvent(snap.key, snap.val());
+  onChildAdded(menRef, menAdded);
+  onChildChanged(menRef, menChanged);
+  notifListeners.push({ ref: menRef, event: "child_added", cb: menAdded });
+  notifListeners.push({ ref: menRef, event: "child_changed", cb: menChanged });
+  const annRef = query(ref(db, "announcements/messages"), orderByChild("timestamp"), limitToLast(30));
+  const annAdded = (snap) => {
+    if (notifiedKeys.has(`ann/${snap.key}`)) return;
+    notifiedKeys.add(`ann/${snap.key}`);
+    const msg = snap.val();
+    if (!msg || msg.uid === currentUser.uid) return;
+    if (screens.announcements.classList.contains("active")) return;
+    pushNotify("📢 New announcement", `${msg.username}: ${(msg.text || "").slice(0, 120)}`, () => openAnnouncements());
+  };
+  onChildAdded(annRef, annAdded);
+  notifListeners.push({ ref: annRef, event: "child_added", cb: annAdded });
+}
+
+function stopNotifListeners() {
+  notifListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  notifListeners = [];
+  notifStarted = false;
+  notifiedKeys = new Set();
+}
+
+function initNotifications() {
+  $("notif-bell").addEventListener("click", toggleNotifications);
+  $("notif-enable").addEventListener("click", enableNotifications);
+  $("notif-dismiss").addEventListener("click", () => {
+    localStorage.setItem("vibechat-notif-asked", "1");
+    $("notif-banner").classList.add("hidden");
+  });
+  if (notifSupported() && Notification.permission === "default" && !localStorage.getItem("vibechat-notif-asked")) {
+    $("notif-banner").classList.remove("hidden");
+  }
+  paintBell();
 }
 
 // ============ NAVIGATION ============
@@ -1619,6 +1780,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initGamesUI();
   initThemes();
   initAnnouncements();
+  initNotifications();
 });
 
 function initGamesUI() {

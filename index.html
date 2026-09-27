@@ -49,6 +49,11 @@
   <!-- ============ LOBBY ============ -->
   <div id="lobby-screen" class="screen">
     <div class="lobby-container">
+      <div id="notif-banner" class="notif-banner hidden">
+        <span>🔔 Get notified about mentions & announcements?</span>
+        <button id="notif-enable" class="btn btn-primary btn-small">Enable</button>
+        <button id="notif-dismiss" class="btn btn-ghost btn-small">Not now</button>
+      </div>
       <header class="lobby-header">
         <div class="logo-small">💬 VibeChat</div>
         <div class="user-info">
@@ -57,6 +62,7 @@
           <button id="profile-btn" class="btn btn-ghost">Profile</button>
           <button id="games-btn" class="btn btn-ghost">🎮 Games</button>
           <button id="ann-btn" class="btn btn-ghost">📢 Announcements <span id="ann-dot" class="unread-dot hidden"></span></button>
+          <button id="notif-bell" class="btn btn-ghost" title="Notifications">🔔</button>
           <div class="theme-wrap">
             <button id="theme-btn" class="btn btn-ghost" title="Colour themes">🎨</button>
             <div id="theme-panel" class="theme-panel hidden"></div>
