@@ -144,6 +144,7 @@ async function handleLogin(e) {
 
   try {
     const cred = await signInWithEmailAndPassword(auth, usernameToEmail(username), password);
+    localStorage.setItem("vibechat-username", username);
     // Backfill profile if signup's DB write previously failed
     try {
       const snap = await get(ref(db, `users/${cred.user.uid}`));
@@ -176,6 +177,7 @@ async function handleSignup(e) {
 
   try {
     const cred = await createUserWithEmailAndPassword(auth, usernameToEmail(username), password);
+    localStorage.setItem("vibechat-username", username);
     // Store username in DB — don't block signup if this fails
     try {
       await set(ref(db, `users/${cred.user.uid}`), {
@@ -212,11 +214,29 @@ function getAuthErrorMessage(code) {
 async function loadUserProfile() {
   try {
     const snap = await get(ref(db, `users/${currentUser.uid}`));
-    const data = snap.val();
-    $("current-username").textContent = data?.username || "user";
+    let username = snap.val()?.username;
+    if (!username) {
+      // Repair: profile missing (created while rules denied writes).
+      // Fall back to the name saved on this device, or ask the user.
+      username = localStorage.getItem("vibechat-username") || prompt("Pick your display name:");
+      if (username) {
+        try {
+          await set(ref(db, `users/${currentUser.uid}`), {
+            username: username,
+            createdAt: serverTimestamp()
+          });
+          localStorage.setItem("vibechat-username", username);
+        } catch (err) {
+          console.error("Profile repair failed:", err);
+        }
+      } else {
+        username = "user";
+      }
+    }
+    $("current-username").textContent = username;
   } catch (err) {
     console.error("Profile load failed:", err);
-    $("current-username").textContent = "user";
+    $("current-username").textContent = localStorage.getItem("vibechat-username") || "user";
     showToast(`Database read failed (${err.code || err.message}) — check rules/URL`, "error");
   }
 
