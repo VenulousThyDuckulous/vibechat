@@ -43,6 +43,8 @@ let isBanned = false;
 let adminUids = new Set(ADMIN_UIDS);
 let userCache = {};
 let mentionCounts = {};
+let currentPresence = {};
+let mentionMenuState = { open: false, items: [], highlight: 0 };
 let presenceRef = null;
 let typingRef = null;
 let messageListeners = [];
@@ -258,6 +260,104 @@ function renderMessageText(raw) {
     const u = urls[+i];
     return `<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
   });
+}
+
+// ============ MENTION AUTOCOMPLETE MENU ============
+function getMentionQuery() {
+  const input = $("message-input");
+  if (!input) return null;
+  const uptoCaret = input.value.slice(0, input.selectionStart ?? input.value.length);
+  const m = /(?:^|\s)@([A-Za-z0-9_ |.\-]*)$/.exec(uptoCaret);
+  if (!m) return null;
+  return { query: m[1], start: uptoCaret.length - m[1].length - 1 };
+}
+
+function hideMentionMenu() {
+  mentionMenuState.open = false;
+  $("mention-menu").classList.add("hidden");
+}
+
+function setMentionHighlight(i) {
+  mentionMenuState.highlight = i;
+  document.querySelectorAll("#mention-menu .mention-row").forEach((row, j) => {
+    row.classList.toggle("selected", j === i);
+    if (j === i) row.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function updateMentionMenu() {
+  const menu = $("mention-menu");
+  const q = currentRoomId && currentUser ? getMentionQuery() : null;
+  if (!q) {
+    hideMentionMenu();
+    return;
+  }
+  const query = q.query.toLowerCase();
+  const onlineItems = Object.entries(currentPresence)
+    .filter(([uid, u]) => uid !== currentUser.uid && (u.username || "").toLowerCase().includes(query))
+    .map(([uid, u]) => ({ uid, username: u.username, online: true }));
+  const seen = new Set(onlineItems.map(i => i.uid));
+  seen.add(currentUser.uid);
+  const otherItems = Object.entries(userCache)
+    .filter(([uid, u]) => !seen.has(uid) && (u.username || "").toLowerCase().includes(query))
+    .map(([uid, u]) => ({ uid, username: u.username, online: false }));
+  const items = [...onlineItems, ...otherItems].slice(0, 8);
+  mentionMenuState = { open: true, items, highlight: 0 };
+  menu.innerHTML = "<h4>Members</h4>";
+  if (!items.length) {
+    menu.innerHTML += '<p class="mention-empty">No matches</p>';
+  } else {
+    items.forEach((item, i) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "mention-row" + (i === 0 ? " selected" : "") + (item.online ? "" : " offline");
+      const photo = (userCache[item.uid] || {}).photoURL;
+      row.innerHTML = `<span class="avatar" data-uid="${escapeHtml(item.uid)}" data-name="${escapeHtml(item.username)}">${avatarInner(item.username, photo)}</span> ${escapeHtml(item.username)}`;
+      row.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        completeMention(item.username);
+      });
+      row.addEventListener("mouseenter", () => setMentionHighlight(i));
+      menu.appendChild(row);
+    });
+  }
+  menu.classList.remove("hidden");
+}
+
+function completeMention(username) {
+  const input = $("message-input");
+  const q = getMentionQuery();
+  hideMentionMenu();
+  if (!q) return;
+  const before = input.value.slice(0, q.start);
+  const after = input.value.slice(input.selectionStart ?? input.value.length);
+  const insert = `@${username} `;
+  input.value = before + insert + after;
+  const pos = before.length + insert.length;
+  input.setSelectionRange(pos, pos);
+  input.focus();
+}
+
+function mentionMenuKey(e) {
+  if (!mentionMenuState.open) return;
+  const items = mentionMenuState.items;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (items.length) setMentionHighlight((mentionMenuState.highlight + 1) % items.length);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (items.length) setMentionHighlight((mentionMenuState.highlight - 1 + items.length) % items.length);
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    if (items.length) {
+      e.preventDefault();
+      completeMention(items[mentionMenuState.highlight].username);
+    } else {
+      hideMentionMenu();
+    }
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    hideMentionMenu();
+  }
 }
 
 // ============ AUTH ============
@@ -628,6 +728,8 @@ async function simpleHash(str) {
 
 async function joinRoom(roomId, data) {
   detachActiveListeners();
+  currentPresence = {};
+  hideMentionMenu();
   currentRoomId = roomId;
   currentRoom = data;
   $("chat-room-name").textContent = data.name;
@@ -659,6 +761,8 @@ function watchRoomExists(roomId) {
 
 function leaveRoom() {
   detachActiveListeners();
+  currentPresence = {};
+  hideMentionMenu();
   if (presenceRef) {
     remove(presenceRef);
     presenceRef = null;
@@ -695,6 +799,7 @@ function setupPresence(roomId) {
   const presenceListRef = ref(db, `rooms/${roomId}/presence`);
   const presenceCb = (snap) => {
     const users = snap.val() || {};
+    currentPresence = users;
     const list = $("online-list");
     list.innerHTML = "";
     const count = Object.keys(users).length;
@@ -705,6 +810,7 @@ function setupPresence(roomId) {
       li.innerHTML = `<span class="online-dot"></span><span class="avatar" data-uid="${escapeHtml(uid)}" data-name="${escapeHtml(u.username)}">${avatarInner(u.username, (userCache[uid] || {}).photoURL)}</span> ${escapeHtml(u.username)}`;
       list.appendChild(li);
     });
+    if (mentionMenuState.open) updateMentionMenu();
   };
   onValue(presenceListRef, presenceCb);
   trackListener(presenceListRef, "value", presenceCb);
@@ -846,6 +952,24 @@ function initChat() {
 
     input.value = "";
     if (typingRef) remove(typingRef);
+    hideMentionMenu();
+  });
+
+  // Mention autocomplete (@ to ping someone)
+  $("message-input").addEventListener("input", updateMentionMenu);
+  $("message-input").addEventListener("keydown", mentionMenuKey);
+  $("mention-btn").addEventListener("click", () => {
+    const input = $("message-input");
+    if (!currentRoomId) return;
+    input.focus();
+    const pos = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, pos);
+    const after = input.value.slice(pos);
+    const needsSpace = before && !/\s$/.test(before) ? " " : "";
+    input.value = before + needsSpace + "@" + after;
+    const newPos = before.length + needsSpace.length + 1;
+    input.setSelectionRange(newPos, newPos);
+    updateMentionMenu();
   });
 }
 
