@@ -2,7 +2,7 @@
 //  VibeChat — Main App Module
 // ============================================================
 
-import { auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
+import { auth, db, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -27,14 +27,6 @@ import {
   limitToLast,
   off
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-import {
-  ref as storageRef,
-  uploadBytesResumable,
-  getDownloadURL,
-  listAll
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
-
-console.log("VibeChat build: inline-images-1");
 
 // ============ STATE ============
 let currentUser = null;
@@ -627,115 +619,6 @@ function initChat() {
     input.value = "";
     if (typingRef) remove(typingRef);
   });
-
-  // File/image attachments via Firebase Storage
-  $("attach-btn").addEventListener("click", () => $("file-input").click());
-  $("file-input").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    e.target.value = "";
-    if (!file || !currentRoomId) return;
-    if (isBanned) {
-      showToast("You are banned", "error");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      showToast("File must be under 5MB", "error");
-      return;
-    }
-
-    const sendBtn = $("send-btn");
-    const attachBtn = $("attach-btn");
-    sendBtn.disabled = true;
-    attachBtn.disabled = true;
-    let finished = false;
-    try {
-      const isImage = file.type.startsWith("image/");
-
-      // Fast path: small images skip Storage entirely — embedded straight
-      // in the message. Works even if Storage is off or its host is blocked.
-      if (isImage && file.size <= 300 * 1024) {
-        console.log("Upload: small image, embedding inline, skipping Storage");
-        sendBtn.textContent = "…";
-        const dataUrl = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(reader.error || new Error("read failed"));
-          reader.readAsDataURL(file);
-        });
-        const inlineCaption = $("message-input").value.trim();
-        await push(ref(db, `rooms/${currentRoomId}/messages`), {
-          uid: currentUser.uid,
-          username: getUsername(),
-          text: inlineCaption || "📷 Image",
-          imageUrl: dataUrl,
-          timestamp: serverTimestamp()
-        });
-        $("message-input").value = "";
-        if (typingRef) remove(typingRef);
-        return;
-      }
-
-      const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-      const sRef = storageRef(storage, `chat-files/${currentRoomId}/${Date.now()}_${safeName}`);
-      console.log("Upload starting:", sRef.fullPath, file.size, "bytes");
-      const task = uploadBytesResumable(sRef, file);
-      let lastMove = Date.now();
-      const watchdog = setInterval(() => {
-        if (finished) {
-          clearInterval(watchdog);
-          return;
-        }
-        if (Date.now() - lastMove > 20000) {
-          clearInterval(watchdog);
-          console.error("Upload stalled: no bytes moved for 20s");
-          task.cancel();
-          showToast("Upload stalled — no data sent in 20s. Check adblocker/VPN, and that Firebase Storage is enabled.", "error", 6000);
-        }
-      }, 5000);
-      await new Promise((resolve, reject) => {
-        task.on("state_changed",
-          (snap) => {
-            lastMove = Date.now();
-            const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
-            sendBtn.textContent = `${pct}%`;
-            console.log(`Upload: ${snap.bytesTransferred}/${snap.totalBytes} state=${snap.state}`);
-          },
-          (err) => {
-            clearInterval(watchdog);
-            reject(err);
-          },
-          () => {
-            clearInterval(watchdog);
-            resolve();
-          }
-        );
-      });
-      finished = true;
-      const url = await getDownloadURL(task.snapshot.ref);
-      const caption = $("message-input").value.trim();
-      await push(ref(db, `rooms/${currentRoomId}/messages`), {
-        uid: currentUser.uid,
-        username: getUsername(),
-        text: caption || (isImage ? "📷 Image" : `📎 ${file.name}`),
-        ...(isImage ? { imageUrl: url } : { fileUrl: url, fileName: file.name }),
-        timestamp: serverTimestamp()
-      });
-      $("message-input").value = "";
-      if (typingRef) remove(typingRef);
-    } catch (err) {
-      finished = true;
-      if (err.code === "storage/canceled") return; // watchdog already showed why
-      console.error("Upload failed:", err);
-      showToast(`Upload failed (${err.code || err.message})`, "error", 6000);
-    } finally {
-      sendBtn.disabled = false;
-      sendBtn.textContent = "Send";
-      attachBtn.disabled = false;
-    }
-  });
-
-  // GIF picker (Tenor)
-  $("gif-btn").addEventListener("click", toggleGifPicker);
 }
 
 function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {
@@ -750,91 +633,6 @@ function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {
   };
   $("modal-cancel").onclick = () => overlay.classList.add("hidden");
   overlay.classList.remove("hidden");
-}
-
-// ============ GIF PICKER (SELF-HOSTED REACTIONS) ============
-function toggleGifPicker() {
-  let picker = document.querySelector(".gif-picker");
-  if (picker) {
-    picker.classList.toggle("hidden");
-    return;
-  }
-
-  picker = document.createElement("div");
-  picker.className = "gif-picker";
-  picker.innerHTML = `
-    <div class="gif-search-row">
-      <input type="text" id="gif-search" placeholder="Search GIFs..." autocomplete="off" />
-    </div>
-    <div class="gif-grid"></div>
-  `;
-  document.querySelector(".chat-main").appendChild(picker);
-
-  const grid = picker.querySelector(".gif-grid");
-  const search = picker.querySelector("#gif-search");
-  let debounce;
-  search.addEventListener("input", () => {
-    clearTimeout(debounce);
-    debounce = setTimeout(() => loadGifs(grid, search.value.trim()), 400);
-  });
-  search.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      clearTimeout(debounce);
-      loadGifs(grid, search.value.trim());
-    }
-  });
-  loadGifs(grid, "");
-}
-
-async function loadGifs(grid, q) {
-  grid.innerHTML = '<p class="gif-status">Loading…</p>';
-  try {
-    const listing = await listAll(storageRef(storage, "reaction-gifs"));
-    const query = (q || "").toLowerCase();
-    const gifs = [];
-    for (const item of listing.items) {
-      if (query && !item.name.toLowerCase().includes(query)) continue;
-      gifs.push({ name: item.name, url: await getDownloadURL(item) });
-    }
-    grid.innerHTML = "";
-    if (!gifs.length) {
-      grid.innerHTML = query
-        ? '<p class="gif-status">No GIFs match that search.</p>'
-        : '<p class="gif-status">No GIFs yet — the owner can add some in Firebase Console → Storage → reaction-gifs/.</p>';
-      return;
-    }
-    gifs.forEach(g => {
-      const img = document.createElement("img");
-      img.src = g.url;
-      img.loading = "lazy";
-      img.alt = g.name;
-      img.title = g.name;
-      img.addEventListener("click", () => sendGif(g.url));
-      grid.appendChild(img);
-    });
-  } catch (err) {
-    console.error("GIF load failed:", err);
-    grid.innerHTML = `<p class="gif-status">Could not load GIFs (${err.code || err.message}). The owner may need to allow reading reaction-gifs in Storage rules.</p>`;
-  }
-}
-
-async function sendGif(url) {
-  if (!currentRoomId || isBanned || !currentUser) return;
-  const picker = document.querySelector(".gif-picker");
-  if (picker) picker.classList.add("hidden");
-  try {
-    await push(ref(db, `rooms/${currentRoomId}/messages`), {
-      uid: currentUser.uid,
-      username: getUsername(),
-      text: "🎬 GIF",
-      imageUrl: url,
-      timestamp: serverTimestamp()
-    });
-  } catch (err) {
-    console.error("GIF send failed:", err);
-    showToast("Could not send GIF", "error");
-  }
 }
 
 // ============ CREATE ROOM ============

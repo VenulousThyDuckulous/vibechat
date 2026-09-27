@@ -6,7 +6,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getDatabase } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-import { getStorage } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyABcRHJYvAV75pQAieSzL5vTBTD52r8kRM",
@@ -30,13 +29,8 @@ const OWNER_USERNAMES = [
   "VenulousRG"
 ];
 
-// Reaction GIFs live in Firebase Storage under reaction-gifs/.
-// The owner uploads them once via Firebase Console → Storage.
-// Everyone can then browse and send them from the 🎬 picker.
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
-const storage = getStorage(app);
 
-export { app, auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES };
+export { app, auth, db, ADMIN_UIDS, OWNER_USERNAMES };

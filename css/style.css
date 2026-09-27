@@ -506,26 +506,6 @@ input::placeholder {
   flex: 1;
 }
 
-.attach-btn {
-  background: none;
-  border: none;
-  font-size: 1.3rem;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: var(--radius-sm);
-  transition: var(--transition);
-  flex-shrink: 0;
-}
-
-.attach-btn:hover {
-  background: var(--bg-hover);
-}
-
-.attach-btn:disabled {
-  opacity: 0.4;
-  cursor: wait;
-}
-
 .msg-delete {
   display: none;
   background: none;
@@ -544,54 +524,6 @@ input::placeholder {
 
 .msg-delete:hover {
   background: rgba(224, 85, 85, 0.25);
-}
-
-/* ============ GIF PICKER ============ */
-.gif-picker {
-  position: absolute;
-  bottom: 70px;
-  left: 20px;
-  width: 320px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  box-shadow: var(--shadow);
-  z-index: 100;
-}
-
-.gif-search-row input {
-  width: 100%;
-}
-
-.gif-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  overflow-y: auto;
-  max-height: 260px;
-  margin-top: 8px;
-}
-
-.gif-grid img {
-  width: 100%;
-  height: 90px;
-  object-fit: cover;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.gif-grid img:hover {
-  outline: 2px solid var(--accent);
-}
-
-.gif-status {
-  grid-column: 1 / -1;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  text-align: center;
-  padding: 16px 8px;
 }
 
 .btn:disabled {
