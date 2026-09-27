@@ -8,7 +8,11 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  updateEmail,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   ref,
@@ -716,6 +720,19 @@ function openProfileModal() {
     <p style="margin-bottom:12px;color:var(--text-secondary);text-align:center">${escapeHtml(getUsername())}</p>
     <input type="file" id="profile-file" accept="image/*" style="width:100%;margin-bottom:12px" />
     <button id="profile-remove" class="btn btn-ghost btn-small" ${currentPhoto ? "" : "disabled"}>Remove picture</button>
+    <div class="profile-section">
+      <h4>Change username</h4>
+      <input type="text" id="profile-username" maxlength="20" placeholder="New username" autocomplete="off" />
+      <input type="password" id="profile-username-pw" placeholder="Current password" autocomplete="current-password" />
+      <button id="profile-username-save" class="btn btn-primary btn-small">Change Username</button>
+    </div>
+    <div class="profile-section">
+      <h4>Change password</h4>
+      <input type="password" id="profile-pw-current" placeholder="Current password" autocomplete="current-password" />
+      <input type="password" id="profile-pw-new" placeholder="New password (min 6)" autocomplete="new-password" />
+      <input type="password" id="profile-pw-confirm" placeholder="Confirm new password" autocomplete="new-password" />
+      <button id="profile-pw-save" class="btn btn-primary btn-small">Change Password</button>
+    </div>
   `;
   const confirmBtn = $("modal-confirm");
   confirmBtn.textContent = "Save";
@@ -752,6 +769,9 @@ function openProfileModal() {
       showToast(`Could not remove picture (${err.code || err.message})`, "error");
     }
   });
+
+  $("profile-username-save").addEventListener("click", changeUsername);
+  $("profile-pw-save").addEventListener("click", changePassword);
 }
 
 async function saveProfileAvatar() {
@@ -772,6 +792,81 @@ async function saveProfileAvatar() {
     console.error("Avatar save failed:", err);
     showToast(`Could not save picture (${err.code || err.message})`, "error");
   }
+}
+
+async function changeUsername() {
+  const newName = $("profile-username").value.trim();
+  const currentPw = $("profile-username-pw").value;
+  if (!newName) return;
+  if (newName === getUsername()) {
+    showToast("That's already your username", "error");
+    return;
+  }
+  if (newName.length < 3 || newName.length > 20) {
+    showToast("Username must be 3–20 characters", "error");
+    return;
+  }
+  if (!currentPw) {
+    showToast("Enter your current password to confirm", "error");
+    return;
+  }
+  try {
+    await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, currentPw));
+    await updateEmail(currentUser, usernameToEmail(newName));
+  } catch (err) {
+    console.error("Username change failed:", err);
+    showToast(
+      err.code === "auth/wrong-password" || err.code === "auth/invalid-credential" ? "Current password is wrong"
+      : err.code === "auth/email-already-in-use" ? "That username is taken"
+      : `Could not change username (${err.code || err.message})`, "error");
+    return;
+  }
+  try {
+    await update(ref(db, `users/${currentUser.uid}`), { username: newName });
+  } catch (err) {
+    console.error("Username profile save failed:", err);
+    showToast(`Login name changed but profile save failed (${err.code})`, "error");
+  }
+  localStorage.setItem("vibechat-username", newName);
+  if (userCache[currentUser.uid]) userCache[currentUser.uid].username = newName;
+  $("current-username").textContent = newName;
+  isOwner = isOwnerName(newName);
+  if (isOwner) isAdmin = true;
+  $("admin-btn").classList.toggle("hidden", !isAdmin);
+  paintHeaderAvatar();
+  paintAvatars(currentUser.uid);
+  $("modal-overlay").classList.add("hidden");
+  showToast(`Username changed to ${newName}`);
+}
+
+async function changePassword() {
+  const currentPw = $("profile-pw-current").value;
+  const next = $("profile-pw-new").value;
+  const confirm = $("profile-pw-confirm").value;
+  if (!currentPw || !next || !confirm) {
+    showToast("Fill in all password fields", "error");
+    return;
+  }
+  if (next !== confirm) {
+    showToast("New passwords don't match", "error");
+    return;
+  }
+  if (next.length < 6) {
+    showToast("New password must be at least 6 characters", "error");
+    return;
+  }
+  try {
+    await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, currentPw));
+    await updatePassword(currentUser, next);
+  } catch (err) {
+    console.error("Password change failed:", err);
+    showToast(
+      err.code === "auth/wrong-password" || err.code === "auth/invalid-credential" ? "Current password is wrong"
+      : `Could not change password (${err.code || err.message})`, "error");
+    return;
+  }
+  $("modal-overlay").classList.add("hidden");
+  showToast("Password changed");
 }
 
 // ============ CREATE ROOM ============

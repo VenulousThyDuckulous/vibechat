@@ -710,6 +710,20 @@ input::placeholder {
   margin-bottom: 12px;
 }
 
+.profile-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-section h4 {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
 /* ============ GAMES ============ */
 .games-container {
   display: flex;
@@ -882,6 +896,8 @@ button {
   padding: 24px;
   width: 100%;
   max-width: 400px;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: var(--shadow);
 }
 

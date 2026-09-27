@@ -17,7 +17,7 @@ A chill place to hang out and chat in real time.
 - 💬 Real-time messages with history
 - 🟢 See who's online in each room
 - ⌨️ Typing indicators
-- 🖼️ Profile pictures
+- 🖼️ Profile pictures, username & password changes
 - 🎮 Minigames with leaderboards
 - 🗑️ Mods can delete messages right from chat
 - 🌙 Dark mode built in
