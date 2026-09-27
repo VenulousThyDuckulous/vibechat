@@ -1,0 +1,12 @@
+{
+  "name": "vibechat",
+  "version": "1.0.0",
+  "description": "A chill real-time chat room app powered by Firebase, deployed to GitHub Pages.",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve .",
+    "deploy": "git push origin main"
+  },
+  "keywords": ["chat", "firebase", "github-pages", "realtime"],
+  "license": "MIT"
+}

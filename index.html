@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VibeChat</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+</head>
+<body>
+  <!-- ============ AUTH SCREEN ============ -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-card">
+      <div class="logo">💬 VibeChat</div>
+      <p class="tagline">chill rooms, real vibes</p>
+
+      <div class="auth-tabs">
+        <button id="tab-login" class="auth-tab active">Log In</button>
+        <button id="tab-signup" class="auth-tab">Sign Up</button>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <input type="text" id="login-username" placeholder="Username" autocomplete="username" required />
+        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required />
+        <button type="submit" class="btn btn-primary">Log In</button>
+      </form>
+
+      <form id="signup-form" class="auth-form hidden">
+        <input type="text" id="signup-username" placeholder="Username" autocomplete="username" required minlength="3" maxlength="20" />
+        <input type="password" id="signup-password" placeholder="Password" autocomplete="new-password" required minlength="6" />
+        <input type="password" id="signup-password2" placeholder="Confirm Password" autocomplete="new-password" required minlength="6" />
+        <button type="submit" class="btn btn-primary">Create Account</button>
+      </form>
+
+      <p id="auth-error" class="error-msg"></p>
+    </div>
+  </div>
+
+  <!-- ============ LOBBY ============ -->
+  <div id="lobby-screen" class="screen">
+    <div class="lobby-container">
+      <header class="lobby-header">
+        <div class="logo-small">💬 VibeChat</div>
+        <div class="user-info">
+          <span id="current-username"></span>
+          <button id="admin-btn" class="btn btn-ghost hidden">🛡️ Admin</button>
+          <button id="logout-btn" class="btn btn-ghost">Log Out</button>
+        </div>
+      </header>
+
+      <div class="lobby-body">
+        <div class="lobby-left">
+          <h2>Rooms</h2>
+          <div id="room-list" class="room-list">
+            <p class="empty-state">No rooms yet — create one!</p>
+          </div>
+        </div>
+
+        <div class="lobby-right">
+          <h2>Create Room</h2>
+          <form id="create-room-form" class="create-room-form">
+            <input type="text" id="room-name" placeholder="Room name" required maxlength="40" />
+            <div class="room-type">
+              <label class="radio-label">
+                <input type="radio" name="room-type" value="public" checked />
+                🌍 Public
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="room-type" value="private" />
+                🔒 Password Only
+              </label>
+            </div>
+            <input type="password" id="room-password" placeholder="Room password" class="hidden" minlength="4" />
+            <button type="submit" class="btn btn-primary">Create Room</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ CHAT ROOM ============ -->
+  <div id="chat-screen" class="screen">
+    <div class="chat-container">
+      <aside class="chat-sidebar">
+        <div class="sidebar-header">
+          <button id="back-btn" class="btn btn-ghost">← Lobby</button>
+          <h3 id="chat-room-name"></h3>
+        </div>
+        <div class="sidebar-section">
+          <h4>Online — <span id="online-count">0</span></h4>
+          <ul id="online-list" class="online-list"></ul>
+        </div>
+      </aside>
+
+      <main class="chat-main">
+        <div id="messages" class="messages"></div>
+        <div id="typing-indicator" class="typing-indicator hidden"></div>
+        <form id="message-form" class="message-form">
+          <button type="button" id="emoji-btn" class="emoji-btn" title="Emoji">😊</button>
+          <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" maxlength="500" />
+          <button type="submit" class="btn btn-primary">Send</button>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============ ADMIN PANEL ============ -->
+  <div id="admin-screen" class="screen">
+    <div class="admin-container">
+      <header class="admin-header">
+        <h2>🛡️ Admin Panel</h2>
+        <button id="admin-back-btn" class="btn btn-ghost">← Back</button>
+      </header>
+
+      <div class="admin-body">
+        <div class="admin-section">
+          <h3>All Rooms</h3>
+          <div id="admin-room-list" class="admin-room-list"></div>
+        </div>
+
+        <div class="admin-section">
+          <h3>All Users</h3>
+          <div id="admin-user-list" class="admin-user-list"></div>
+        </div>
+
+        <div class="admin-section">
+          <h3>Recent Messages</h3>
+          <div id="admin-message-list" class="admin-message-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL ============ -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="modal-title"></h3>
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn btn-ghost">Cancel</button>
+        <button id="modal-confirm" class="btn btn-danger">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ TOAST ============ -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
