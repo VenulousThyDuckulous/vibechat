@@ -164,11 +164,16 @@ async function handleSignup(e) {
 
   try {
     const cred = await createUserWithEmailAndPassword(auth, usernameToEmail(username), password);
-    // Store username in DB
-    await set(ref(db, `users/${cred.user.uid}`), {
-      username: username,
-      createdAt: serverTimestamp()
-    });
+    // Store username in DB — don't block signup if this fails
+    try {
+      await set(ref(db, `users/${cred.user.uid}`), {
+        username: username,
+        createdAt: serverTimestamp()
+      });
+    } catch (dbErr) {
+      console.error("Profile save failed:", dbErr);
+      showError(`Account created but profile save failed (${dbErr.code || dbErr.message}). Check database rules/URL.`);
+    }
   } catch (err) {
     console.error("Signup failed:", err);
     showError(getAuthErrorMessage(err.code) + (err.code ? ` (${err.code})` : ""));
@@ -193,10 +198,15 @@ function getAuthErrorMessage(code) {
 }
 
 async function loadUserProfile() {
-  const snap = await get(ref(db, `users/${currentUser.uid}`));
-  const data = snap.val();
-  const username = data?.username || "user";
-  $("current-username").textContent = username;
+  try {
+    const snap = await get(ref(db, `users/${currentUser.uid}`));
+    const data = snap.val();
+    $("current-username").textContent = data?.username || "user";
+  } catch (err) {
+    console.error("Profile load failed:", err);
+    $("current-username").textContent = "user";
+    showToast(`Database read failed (${err.code || err.message}) — check rules/URL`, "error");
+  }
 
   // Show admin button if admin
   $("admin-btn").classList.toggle("hidden", !isAdmin);
