@@ -56,6 +56,7 @@
           <span id="current-username"></span>
           <button id="profile-btn" class="btn btn-ghost">Profile</button>
           <button id="games-btn" class="btn btn-ghost">🎮 Games</button>
+          <button id="ann-btn" class="btn btn-ghost">📢 Announcements <span id="ann-dot" class="unread-dot hidden"></span></button>
           <div class="theme-wrap">
             <button id="theme-btn" class="btn btn-ghost" title="Colour themes">🎨</button>
             <div id="theme-panel" class="theme-panel hidden"></div>
@@ -143,6 +144,24 @@
     </div>
   </div>
 
+  <!-- ============ ANNOUNCEMENTS ============ -->
+  <div id="announcements-screen" class="screen">
+    <div class="chat-container">
+      <div class="chat-main">
+        <div class="sidebar-header" style="border-bottom:1px solid var(--border)">
+          <button id="ann-back-btn" class="btn btn-ghost">← Lobby</button>
+          <h3>📢 Announcements</h3>
+        </div>
+        <div id="ann-messages" class="messages"></div>
+        <div id="ann-readonly" class="readonly-notice hidden">🔒 Only the owner can post announcements.</div>
+        <form id="ann-form" class="message-form hidden">
+          <input type="text" id="ann-input" placeholder="Post an announcement..." autocomplete="off" maxlength="500" />
+          <button type="submit" class="btn btn-primary">Post</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ CHAT ROOM ============ -->
   <div id="chat-screen" class="screen">
     <div class="chat-container">
@@ -161,7 +180,6 @@
       <main class="chat-main">
         <div id="messages" class="messages"></div>
         <div id="typing-indicator" class="typing-indicator hidden"></div>
-        <div id="readonly-notice" class="readonly-notice hidden">🔒 Only the owner can post in announcements.</div>
         <form id="message-form" class="message-form">
           <button type="button" id="mention-btn" class="mention-at-btn" title="Mention someone">@</button>
           <div id="mention-menu" class="mention-menu hidden"></div>

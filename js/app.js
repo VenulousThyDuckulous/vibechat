@@ -48,25 +48,19 @@ let mentionMenuState = { open: false, items: [], highlight: 0 };
 
 const ANNOUNCEMENTS_ID = "announcements";
 
-// System room: pinned to the top, everyone can read, only the owner posts.
-// Auto-created on first load (identical data from every client, so races are harmless).
-async function ensureAnnouncementsRoom() {
+// One-time migration: the old pinned announcements room (if any) moves to
+// the dedicated announcements feed, then the legacy room is removed.
+async function migrateAnnouncements() {
   try {
-    const snap = await get(ref(db, `rooms/${ANNOUNCEMENTS_ID}`));
-    if (!snap.exists()) {
-      await set(ref(db, `rooms/${ANNOUNCEMENTS_ID}`), {
-        name: "📢 Announcements",
-        createdBy: "system",
-        createdByName: "VibeChat",
-        createdAt: serverTimestamp(),
-        isPrivate: false,
-        passwordHash: null,
-        memberCount: 0,
-        system: true
-      });
+    const legacy = await get(ref(db, `rooms/${ANNOUNCEMENTS_ID}`));
+    if (!legacy.exists()) return;
+    const msgs = legacy.val()?.messages || {};
+    for (const [id, m] of Object.entries(msgs)) {
+      await set(ref(db, `announcements/messages/${id}`), m);
     }
+    await remove(ref(db, `rooms/${ANNOUNCEMENTS_ID}`));
   } catch (err) {
-    console.error("Announcements bootstrap failed:", err);
+    console.error("Announcements migration failed:", err);
   }
 }
 let presenceRef = null;
@@ -94,7 +88,8 @@ const screens = {
   lobby: $("lobby-screen"),
   chat: $("chat-screen"),
   admin: $("admin-screen"),
-  games: $("games-screen")
+  games: $("games-screen"),
+  announcements: $("announcements-screen")
 };
 
 // ============ UTILITIES ============
@@ -402,6 +397,7 @@ function initAuth() {
       loadUserProfile();
     } else {
       detachActiveListeners();
+      closeAnnListeners();
       if (presenceRef && currentUser) {
         try { remove(presenceRef); } catch (e) {}
       }
@@ -620,9 +616,10 @@ async function loadUserProfile() {
   // Show admin button if admin
   $("admin-btn").classList.toggle("hidden", !isAdmin);
 
-  await ensureAnnouncementsRoom();
+  await migrateAnnouncements();
   showScreen("lobby");
   loadRooms();
+  updateAnnouncementsBadge();
 }
 
 $("logout-btn").addEventListener("click", async () => {
@@ -693,16 +690,11 @@ function addRoomToList(roomId, data) {
     </div>
     <div class="room-badges">
       <span class="mention-badge hidden"></span>
-      <span class="room-card-badge ${data.isPrivate ? "private" : ""}">${roomId === ANNOUNCEMENTS_ID ? "📌" : data.isPrivate ? "🔒" : "🌍"}</span>
+      <span class="room-card-badge ${data.isPrivate ? "private" : ""}">${data.isPrivate ? "🔒" : "🌍"}</span>
     </div>
   `;
   card.addEventListener("click", () => handleJoinRoom(roomId, data));
-  if (roomId === ANNOUNCEMENTS_ID) {
-    card.classList.add("announcements");
-    list.prepend(card);
-  } else {
-    list.appendChild(card);
-  }
+  list.appendChild(card);
   updateMentionBadges();
 }
 
@@ -764,13 +756,9 @@ async function joinRoom(roomId, data) {
   currentRoomId = roomId;
   currentRoom = data;
   $("chat-room-name").textContent = data.name;
-  // Only the creator (or an admin) can close the room — never the system room
-  const canClose = (currentUser.uid === data.createdBy || isAdmin) && roomId !== ANNOUNCEMENTS_ID;
+  // Only the creator (or an admin) can close the room
+  const canClose = currentUser.uid === data.createdBy || isAdmin;
   $("close-room-btn").classList.toggle("hidden", !canClose);
-  // Announcements is read-only for everyone except the owner
-  const readOnly = roomId === ANNOUNCEMENTS_ID && !isOwner;
-  $("message-form").classList.toggle("hidden", readOnly);
-  $("readonly-notice").classList.toggle("hidden", !readOnly);
   showScreen("chat");
   await refreshUserCache();
   // Opening the room marks its mentions as read
@@ -809,10 +797,9 @@ function leaveRoom() {
   currentRoom = null;
   currentRoomId = null;
   $("messages").innerHTML = "";
-  $("message-form").classList.remove("hidden");
-  $("readonly-notice").classList.add("hidden");
   showScreen("lobby");
   loadRooms();
+  updateAnnouncementsBadge();
 }
 
 function setupPresence(roomId) {
@@ -964,7 +951,6 @@ function initChat() {
       showToast("You are banned", "error");
       return;
     }
-    if (currentRoomId === ANNOUNCEMENTS_ID && !isOwner) return;
     const input = $("message-input");
     const text = input.value.trim();
     if (!text || !currentRoomId) return;
@@ -1261,8 +1247,8 @@ async function loadAdminData() {
         <p>By ${escapeHtml(data.createdByName || "unknown")} · ${data.isPrivate ? "🔒 Private" : "🌍 Public"} · ${data.memberCount || 0} members</p>
       </div>
       <div class="admin-item-actions">
-        ${id === ANNOUNCEMENTS_ID ? '<span class="admin-note">System room</span>' : `<button class="btn btn-ghost btn-small" onclick="window.__viewRoom('${id}')">View</button>
-        <button class="btn btn-danger btn-small" onclick="window.__deleteRoom('${id}')">Delete</button>`}
+        <button class="btn btn-ghost btn-small" onclick="window.__viewRoom('${id}')">View</button>
+        <button class="btn btn-danger btn-small" onclick="window.__deleteRoom('${id}')">Delete</button>
       </div>
     `;
     roomList.appendChild(item);
@@ -1458,6 +1444,110 @@ function initThemes() {
     }
   });
 }
+// ============ ANNOUNCEMENTS TAB ============
+let annListeners = [];
+
+function closeAnnListeners() {
+  annListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  annListeners = [];
+}
+
+function openAnnouncements() {
+  closeAnnListeners();
+  $("ann-messages").innerHTML = "";
+  $("ann-form").classList.toggle("hidden", !isOwner);
+  $("ann-readonly").classList.toggle("hidden", isOwner);
+  localStorage.setItem("vibechat-ann-seen", String(Date.now()));
+  $("ann-dot").classList.add("hidden");
+  showScreen("announcements");
+  const msgsRef = query(ref(db, "announcements/messages"), orderByChild("timestamp"), limitToLast(100));
+  const addedCb = (snap) => appendAnnouncement(snap.key, snap.val());
+  const removedCb = (snap) => {
+    document.querySelector(`#ann-messages .message[data-msg-id="${snap.key}"]`)?.remove();
+  };
+  onChildAdded(msgsRef, addedCb);
+  onChildRemoved(msgsRef, removedCb);
+  annListeners.push({ ref: msgsRef, event: "child_added", cb: addedCb });
+  annListeners.push({ ref: msgsRef, event: "child_removed", cb: removedCb });
+}
+
+function closeAnnouncements() {
+  closeAnnListeners();
+  $("ann-messages").innerHTML = "";
+  showScreen("lobby");
+}
+
+function appendAnnouncement(msgId, msg) {
+  const container = $("ann-messages");
+  if (!msg || container.querySelector(`[data-msg-id="${msgId}"]`)) return;
+  const div = document.createElement("div");
+  div.className = "message other";
+  div.dataset.msgId = msgId;
+  const isMsgAdmin = adminUids.has(msg.uid);
+  const isMsgOwner = !isMsgAdmin && isOwnerName(msg.username);
+  div.innerHTML = `
+    <div class="message-header">
+      <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
+      <span class="message-username">${escapeHtml(msg.username)}</span>
+      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
+      <span class="message-time">${formatTime(msg.timestamp)}</span>
+    </div>
+    <div class="message-bubble">${renderMessageText(msg.text)}</div>
+  `;
+  if (messageMentionsMe(msg.text)) div.classList.add("mentioned");
+  if (isAdmin) {
+    const header = div.querySelector(".message-header");
+    const del = document.createElement("button");
+    del.className = "msg-delete";
+    del.title = "Delete announcement";
+    del.textContent = "🗑️";
+    del.addEventListener("click", () => {
+      showConfirmModal(
+        "Delete this announcement?",
+        `<p style="color:var(--text-secondary)">${escapeHtml((msg.text || "").slice(0, 120))}</p>`,
+        "Delete",
+        () => remove(ref(db, `announcements/messages/${msgId}`))
+      );
+    });
+    header.appendChild(del);
+  }
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function updateAnnouncementsBadge() {
+  try {
+    const seen = Number(localStorage.getItem("vibechat-ann-seen") || 0);
+    const snap = await get(query(ref(db, "announcements/messages"), orderByChild("timestamp"), limitToLast(1)));
+    let latest = 0;
+    snap.forEach(s => {
+      latest = Math.max(latest, s.val()?.timestamp || 0);
+    });
+    $("ann-dot").classList.toggle("hidden", !(latest > seen));
+  } catch (err) {
+    /* offline or no announcements yet — no badge */
+  }
+}
+
+function initAnnouncements() {
+  $("ann-btn").addEventListener("click", openAnnouncements);
+  $("ann-back-btn").addEventListener("click", closeAnnouncements);
+  $("ann-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!isOwner || isBanned) return;
+    const input = $("ann-input");
+    const text = input.value.trim();
+    if (!text) return;
+    await push(ref(db, "announcements/messages"), {
+      uid: currentUser.uid,
+      username: getUsername(),
+      text: text,
+      timestamp: serverTimestamp()
+    });
+    input.value = "";
+  });
+}
+
 // ============ NAVIGATION ============
 function initNavigation() {
   $("back-btn").addEventListener("click", leaveRoom);
@@ -1489,6 +1579,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initNavigation();
   initGamesUI();
   initThemes();
+  initAnnouncements();
 });
 
 function initGamesUI() {

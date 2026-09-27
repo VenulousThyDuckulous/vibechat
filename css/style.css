@@ -648,8 +648,14 @@ input::placeholder {
   flex-shrink: 0;
 }
 
-.room-card.announcements {
-  border-left: 3px solid var(--warning);
+.unread-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  margin-left: 4px;
+  vertical-align: middle;
 }
 
 .readonly-notice {

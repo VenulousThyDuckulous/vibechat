@@ -19,7 +19,7 @@ A chill place to hang out and chat in real time.
 - ⌨️ Typing indicators
 - 🖼️ Profile pictures, username & password changes
 - 📣 @mentions with unread badges
-- 📌 Announcements room (owner posts, everyone reads)
+- 📌 Announcements tab (owner posts, everyone reads)
 - 🎮 Minigames with leaderboards
 - 🗑️ Mods can delete messages right from chat
 - 🌙 Dark mode built in
