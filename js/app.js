@@ -34,6 +34,8 @@ import {
   listAll
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
+console.log("VibeChat build: inline-images-1");
+
 // ============ STATE ============
 let currentUser = null;
 let currentRoom = null;
@@ -647,6 +649,32 @@ function initChat() {
     attachBtn.disabled = true;
     let finished = false;
     try {
+      const isImage = file.type.startsWith("image/");
+
+      // Fast path: small images skip Storage entirely — embedded straight
+      // in the message. Works even if Storage is off or its host is blocked.
+      if (isImage && file.size <= 300 * 1024) {
+        console.log("Upload: small image, embedding inline, skipping Storage");
+        sendBtn.textContent = "…";
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error("read failed"));
+          reader.readAsDataURL(file);
+        });
+        const inlineCaption = $("message-input").value.trim();
+        await push(ref(db, `rooms/${currentRoomId}/messages`), {
+          uid: currentUser.uid,
+          username: getUsername(),
+          text: inlineCaption || "📷 Image",
+          imageUrl: dataUrl,
+          timestamp: serverTimestamp()
+        });
+        $("message-input").value = "";
+        if (typingRef) remove(typingRef);
+        return;
+      }
+
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
       const sRef = storageRef(storage, `chat-files/${currentRoomId}/${Date.now()}_${safeName}`);
       console.log("Upload starting:", sRef.fullPath, file.size, "bytes");
@@ -684,7 +712,6 @@ function initChat() {
       });
       finished = true;
       const url = await getDownloadURL(task.snapshot.ref);
-      const isImage = file.type.startsWith("image/");
       const caption = $("message-input").value.trim();
       await push(ref(db, `rooms/${currentRoomId}/messages`), {
         uid: currentUser.uid,
