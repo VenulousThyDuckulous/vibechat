@@ -18,7 +18,7 @@ A chill place to hang out and chat in real time.
 - 🟢 See who's online in each room
 - ⌨️ Typing indicators
 - 🖼️ Profile pictures, username & password changes
-- 📣 @mentions with unread badges
+- 📣 @mentions + owner-only @everyone, with unread badges
 - 📌 Announcements tab (owner posts, everyone reads)
 - 🎮 Minigames with leaderboards
 - 🗑️ Mods can delete messages right from chat

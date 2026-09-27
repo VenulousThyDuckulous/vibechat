@@ -240,9 +240,16 @@ function findUserByName(name) {
   return null;
 }
 
-function extractMentionedUids(text) {
+function extractMentionedUids(text, senderIsOwner) {
   const uids = new Set();
-  (text || "").replace(MENTION_RE, (m, name) => {
+  const raw = text || "";
+  // @everyone: owner-only broadcast to every known user
+  if (senderIsOwner && /(?:^|\s)@everyone(?![A-Za-z0-9_])/i.test(raw) && currentUser) {
+    for (const uid of Object.keys(userCache)) {
+      if (uid !== currentUser.uid) uids.add(uid);
+    }
+  }
+  raw.replace(MENTION_RE, (m, name) => {
     const hit = findUserByName(name);
     if (hit && currentUser && hit.uid !== currentUser.uid) uids.add(hit.uid);
     return m;
@@ -250,10 +257,13 @@ function extractMentionedUids(text) {
   return [...uids];
 }
 
-function messageMentionsMe(text) {
+function messageMentionsMe(msg) {
+  const text = msg?.text || "";
+  // Owner-sent @everyone pings every viewer
+  if (isOwnerName(msg?.username) && /(?:^|\s)@everyone(?![A-Za-z0-9_])/i.test(text)) return true;
   const myName = getUsername().toLowerCase();
   let found = false;
-  (text || "").replace(MENTION_RE, (m, name) => {
+  text.replace(MENTION_RE, (m, name) => {
     const hit = findUserByName(name);
     if (hit && hit.username.toLowerCase() === myName) found = true;
     return m;
@@ -261,7 +271,7 @@ function messageMentionsMe(text) {
   return found;
 }
 
-function renderMessageText(raw) {
+function renderMessageText(raw, everyoneActive = false) {
   const esc = escapeHtml(raw || "");
   const urls = [];
   const noUrls = esc.replace(URL_RE, (m) => {
@@ -270,6 +280,10 @@ function renderMessageText(raw) {
   });
   const myName = getUsername().toLowerCase();
   const withMentions = noUrls.replace(MENTION_RE, (m, name) => {
+    const trimmed = name.trim().replace(/[ .|\-]+$/, "");
+    if (everyoneActive && trimmed.toLowerCase() === "everyone") {
+      return `<span class="mention me">@everyone</span>`;
+    }
     const hit = findUserByName(name);
     if (!hit) return m;
     const me = hit.username.toLowerCase() === myName;
@@ -320,7 +334,11 @@ function updateMentionMenu() {
   const otherItems = Object.entries(userCache)
     .filter(([uid, u]) => !seen.has(uid) && (u.username || "").toLowerCase().includes(query))
     .map(([uid, u]) => ({ uid, username: u.username, online: false }));
-  const items = [...onlineItems, ...otherItems].slice(0, 8);
+  let items = [...onlineItems, ...otherItems];
+  if (isOwner && "everyone".includes(query)) {
+    items.unshift({ uid: null, username: "everyone", online: true, everyone: true });
+  }
+  items = items.slice(0, 8);
   mentionMenuState = { open: true, items, highlight: 0 };
   menu.innerHTML = "<h4>Members</h4>";
   if (!items.length) {
@@ -330,8 +348,12 @@ function updateMentionMenu() {
       const row = document.createElement("button");
       row.type = "button";
       row.className = "mention-row" + (i === 0 ? " selected" : "") + (item.online ? "" : " offline");
-      const photo = (userCache[item.uid] || {}).photoURL;
-      row.innerHTML = `<span class="avatar" data-uid="${escapeHtml(item.uid)}" data-name="${escapeHtml(item.username)}">${avatarInner(item.username, photo)}</span> ${escapeHtml(item.username)}`;
+      if (item.everyone) {
+        row.innerHTML = `<span style="font-size:1.1rem">📣</span> <b>everyone</b> <span style="color:var(--text-secondary);font-size:0.8rem">Notify everyone</span>`;
+      } else {
+        const photo = (userCache[item.uid] || {}).photoURL;
+        row.innerHTML = `<span class="avatar" data-uid="${escapeHtml(item.uid)}" data-name="${escapeHtml(item.username)}">${avatarInner(item.username, photo)}</span> ${escapeHtml(item.username)}`;
+      }
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
         completeMention(item.username);
@@ -888,9 +910,9 @@ function appendMessage(msgId, msg) {
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
-    <div class="message-bubble">${renderMessageText(msg.text)}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
+    <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
   `;
-  if (messageMentionsMe(msg.text)) div.classList.add("mentioned");
+  if (messageMentionsMe(msg)) div.classList.add("mentioned");
   container.appendChild(div);
   if (isAdmin) {
     const header = div.querySelector(".message-header");
@@ -964,7 +986,7 @@ function initChat() {
     });
     // Notify mentioned users (unread badge on their lobby room card)
     try {
-      for (const uid of extractMentionedUids(text)) {
+      for (const uid of extractMentionedUids(text, isOwner)) {
         await set(ref(db, `mentions/${uid}/${currentRoomId}/${msgRef.key}`), {
           by: getUsername(),
           at: serverTimestamp()
@@ -1459,6 +1481,7 @@ function openAnnouncements() {
   $("ann-readonly").classList.toggle("hidden", isOwner);
   localStorage.setItem("vibechat-ann-seen", String(Date.now()));
   $("ann-dot").classList.add("hidden");
+  remove(ref(db, `mentions/${currentUser.uid}/announcements`)).catch(() => {});
   showScreen("announcements");
   const msgsRef = query(ref(db, "announcements/messages"), orderByChild("timestamp"), limitToLast(100));
   const addedCb = (snap) => appendAnnouncement(snap.key, snap.val());
@@ -1492,9 +1515,9 @@ function appendAnnouncement(msgId, msg) {
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
-    <div class="message-bubble">${renderMessageText(msg.text)}</div>
+    <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}</div>
   `;
-  if (messageMentionsMe(msg.text)) div.classList.add("mentioned");
+  if (messageMentionsMe(msg)) div.classList.add("mentioned");
   if (isAdmin) {
     const header = div.querySelector(".message-header");
     const del = document.createElement("button");
@@ -1517,13 +1540,18 @@ function appendAnnouncement(msgId, msg) {
 
 async function updateAnnouncementsBadge() {
   try {
+    if (!currentUser) return;
     const seen = Number(localStorage.getItem("vibechat-ann-seen") || 0);
-    const snap = await get(query(ref(db, "announcements/messages"), orderByChild("timestamp"), limitToLast(1)));
+    const [msgSnap, menSnap] = await Promise.all([
+      get(query(ref(db, "announcements/messages"), orderByChild("timestamp"), limitToLast(1))),
+      get(ref(db, `mentions/${currentUser.uid}/announcements`))
+    ]);
     let latest = 0;
-    snap.forEach(s => {
+    msgSnap.forEach(s => {
       latest = Math.max(latest, s.val()?.timestamp || 0);
     });
-    $("ann-dot").classList.toggle("hidden", !(latest > seen));
+    const hasMentions = menSnap.exists() && Object.keys(menSnap.val() || {}).length > 0;
+    $("ann-dot").classList.toggle("hidden", !(latest > seen || hasMentions));
   } catch (err) {
     /* offline or no announcements yet — no badge */
   }
@@ -1538,12 +1566,23 @@ function initAnnouncements() {
     const input = $("ann-input");
     const text = input.value.trim();
     if (!text) return;
-    await push(ref(db, "announcements/messages"), {
+    const annRef = await push(ref(db, "announcements/messages"), {
       uid: currentUser.uid,
       username: getUsername(),
       text: text,
       timestamp: serverTimestamp()
     });
+    // Owner @everyone pings light up everyone's Announcements tab
+    try {
+      await Promise.all(extractMentionedUids(text, isOwner).map(uid =>
+        set(ref(db, `mentions/${uid}/announcements/${annRef.key}`), {
+          by: getUsername(),
+          at: serverTimestamp()
+        })
+      ));
+    } catch (err) {
+      console.error("Announcement mention notify failed:", err);
+    }
     input.value = "";
   });
 }
