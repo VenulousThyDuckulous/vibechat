@@ -9,7 +9,7 @@
   --bg-hover: #262633;
   --text-primary: #e8e8f0;
   --text-secondary: #9898b0;
-  --text-muted: #6868808;
+  --text-muted: #686880;
   --accent: #7c6cf0;
   --accent-hover: #8f7ff5;
   --accent-glow: rgba(124, 108, 240, 0.15);
@@ -27,6 +27,10 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+.hidden {
+  display: none !important;
 }
 
 body {

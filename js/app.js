@@ -18,6 +18,7 @@ import {
   onChildAdded,
   onChildRemoved,
   onChildChanged,
+  onDisconnect,
   remove,
   update,
   serverTimestamp,
@@ -36,6 +37,18 @@ let presenceRef = null;
 let typingRef = null;
 let messageListeners = [];
 let roomListeners = [];
+let activeListeners = [];
+
+function trackListener(r, event, cb) {
+  activeListeners.push({ ref: r, event, cb });
+}
+
+function detachActiveListeners() {
+  activeListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  activeListeners = [];
+  messageListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  messageListeners = [];
+}
 
 // ============ DOM REFS ============
 const $ = (id) => document.getElementById(id);
@@ -195,6 +208,9 @@ function loadRooms() {
   roomListeners.forEach(({ ref: r, event, cb }) => off(r, event, cb));
   roomListeners = [];
 
+  // Clear list to avoid duplicates on re-entry
+  $("room-list").innerHTML = '<p class="empty-state">No rooms yet — create one!</p>';
+
   const roomsRef = ref(db, "rooms");
   const addedCb = (snap) => {
     const room = snap.key;
@@ -278,6 +294,7 @@ async function simpleHash(str) {
 }
 
 function joinRoom(roomId, data) {
+  detachActiveListeners();
   currentRoomId = roomId;
   currentRoom = data;
   $("chat-room-name").textContent = data.name;
@@ -306,7 +323,7 @@ function setupPresence(roomId) {
 
   // Listen for presence changes
   const presenceListRef = ref(db, `rooms/${roomId}/presence`);
-  onValue(presenceListRef, (snap) => {
+  const presenceCb = (snap) => {
     const users = snap.val() || {};
     const list = $("online-list");
     list.innerHTML = "";
@@ -318,7 +335,9 @@ function setupPresence(roomId) {
       li.innerHTML = `<span class="online-dot"></span> ${escapeHtml(u.username)}`;
       list.appendChild(li);
     });
-  });
+  };
+  onValue(presenceListRef, presenceCb);
+  trackListener(presenceListRef, "value", presenceCb);
 }
 
 function getUsername() {
@@ -327,8 +346,7 @@ function getUsername() {
 
 function loadMessages(roomId) {
   // Clear old message listeners
-  messageListeners.forEach(({ ref: r, event, cb }) => off(r, event, cb));
-  messageListeners = [];
+  detachActiveListeners();
 
   const messagesRef = query(
     ref(db, `rooms/${roomId}/messages`),
@@ -346,7 +364,7 @@ function loadMessages(roomId) {
   };
 
   onChildAdded(messagesRef, addedCb);
-  messageListeners.push({ ref: messagesRef, event: "child_added", cb: addedCb });
+  trackListener(messagesRef, "child_added", addedCb);
 }
 
 function appendMessage(msgId, msg) {
@@ -374,17 +392,17 @@ function setupTyping(roomId) {
   typingRef = ref(db, `rooms/${roomId}/typing/${currentUser.uid}`);
   const input = $("message-input");
 
-  input.addEventListener("input", () => {
+  input.oninput = () => {
     if (input.value.trim()) {
       set(typingRef, { username: getUsername(), typing: true });
     } else {
       remove(typingRef);
     }
-  });
+  };
 
   // Listen for typing
   const typingRef2 = ref(db, `rooms/${roomId}/typing`);
-  onValue(typingRef2, (snap) => {
+  const typingCb = (snap) => {
     const typing = snap.val() || {};
     const indicator = $("typing-indicator");
     const names = Object.values(typing)
@@ -397,7 +415,9 @@ function setupTyping(roomId) {
     } else {
       indicator.classList.add("hidden");
     }
-  });
+  };
+  onValue(typingRef2, typingCb);
+  trackListener(typingRef2, "value", typingCb);
 }
 
 // ============ MESSAGES ============
@@ -608,6 +628,7 @@ window.__deleteMessage = async (roomId, msgId) => {
 // ============ NAVIGATION ============
 function initNavigation() {
   $("back-btn").addEventListener("click", () => {
+    detachActiveListeners();
     if (presenceRef) {
       remove(presenceRef);
       presenceRef = null;
@@ -618,6 +639,7 @@ function initNavigation() {
     }
     currentRoom = null;
     currentRoomId = null;
+    $("messages").innerHTML = "";
     showScreen("lobby");
     loadRooms();
   });
