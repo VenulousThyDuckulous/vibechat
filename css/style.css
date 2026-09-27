@@ -502,57 +502,8 @@ input::placeholder {
   background: var(--bg-secondary);
 }
 
-.emoji-btn {
-  background: none;
-  border: none;
-  font-size: 1.3rem;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: var(--radius-sm);
-  transition: var(--transition);
-}
-
-.emoji-btn:hover {
-  background: var(--bg-hover);
-}
-
 .message-form input {
   flex: 1;
-}
-
-/* ============ EMOJI PICKER ============ */
-.emoji-picker {
-  position: absolute;
-  bottom: 70px;
-  left: 20px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  box-shadow: var(--shadow);
-  z-index: 100;
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 4px;
-  max-width: 320px;
-}
-
-.emoji-picker.hidden {
-  display: none;
-}
-
-.emoji-picker button {
-  background: none;
-  border: none;
-  font-size: 1.3rem;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: var(--radius-sm);
-  transition: var(--transition);
-}
-
-.emoji-picker button:hover {
-  background: var(--bg-hover);
 }
 
 /* ============ ADMIN PANEL ============ */

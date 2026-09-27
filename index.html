@@ -85,6 +85,7 @@
         <div class="sidebar-header">
           <button id="back-btn" class="btn btn-ghost">← Lobby</button>
           <h3 id="chat-room-name"></h3>
+          <button id="close-room-btn" class="btn btn-danger btn-small hidden" style="margin-top:8px">Close Room</button>
         </div>
         <div class="sidebar-section">
           <h4>Online — <span id="online-count">0</span></h4>
@@ -96,7 +97,6 @@
         <div id="messages" class="messages"></div>
         <div id="typing-indicator" class="typing-indicator hidden"></div>
         <form id="message-form" class="message-form">
-          <button type="button" id="emoji-btn" class="emoji-btn" title="Emoji">😊</button>
           <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" maxlength="500" />
           <button type="submit" class="btn btn-primary">Send</button>
         </form>

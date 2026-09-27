@@ -298,6 +298,10 @@ function addRoomToList(roomId, data) {
 function removeRoomFromList(roomId) {
   const card = document.querySelector(`[data-room-id="${roomId}"]`);
   if (card) card.remove();
+  const list = $("room-list");
+  if (list && !list.children.length) {
+    list.innerHTML = '<p class="empty-state">No rooms yet — create one!</p>';
+  }
 }
 
 function handleJoinRoom(roomId, data) {
@@ -347,10 +351,44 @@ function joinRoom(roomId, data) {
   currentRoomId = roomId;
   currentRoom = data;
   $("chat-room-name").textContent = data.name;
+  // Only the creator (or an admin) can close the room
+  const canClose = currentUser.uid === data.createdBy || isAdmin;
+  $("close-room-btn").classList.toggle("hidden", !canClose);
   showScreen("chat");
+  watchRoomExists(roomId);
   setupPresence(roomId);
   loadMessages(roomId);
   setupTyping(roomId);
+}
+
+// If the room is deleted while we're inside, bounce back to lobby
+function watchRoomExists(roomId) {
+  const roomRef = ref(db, `rooms/${roomId}/name`);
+  const cb = (snap) => {
+    if (!snap.exists() && currentRoomId === roomId) {
+      leaveRoom();
+      showToast("This room was closed", "error");
+    }
+  };
+  onValue(roomRef, cb);
+  trackListener(roomRef, "value", cb);
+}
+
+function leaveRoom() {
+  detachActiveListeners();
+  if (presenceRef) {
+    remove(presenceRef);
+    presenceRef = null;
+  }
+  if (typingRef) {
+    remove(typingRef);
+    typingRef = null;
+  }
+  currentRoom = null;
+  currentRoomId = null;
+  $("messages").innerHTML = "";
+  showScreen("lobby");
+  loadRooms();
 }
 
 function setupPresence(roomId) {
@@ -394,9 +432,6 @@ function getUsername() {
 }
 
 function loadMessages(roomId) {
-  // Clear old message listeners
-  detachActiveListeners();
-
   const messagesRef = query(
     ref(db, `rooms/${roomId}/messages`),
     orderByChild("timestamp"),
@@ -488,33 +523,20 @@ function initChat() {
     input.value = "";
     if (typingRef) remove(typingRef);
   });
-
-  // Emoji picker
-  $("emoji-btn").addEventListener("click", toggleEmojiPicker);
 }
 
-function toggleEmojiPicker() {
-  let picker = document.querySelector(".emoji-picker");
-  if (picker) {
-    picker.classList.toggle("hidden");
-    return;
-  }
-
-  picker = document.createElement("div");
-  picker.className = "emoji-picker";
-  const emojis = ["😀","😂","🥰","😎","🤔","😅","😭","😤","🥺","😴","🤯","🥳","😇","🙃","😉","👍","👎","👏","🙌","💪","🔥","✨","💯","🎉","❤️","💜","💙","💚","💛","🧡","💔","⭐","🌟","⚡","🌈","☀️","🌙","🍕","🍔","☕","🎵","🎮","🏆","💎","🚀","👋","🤝","✅","❌","⚠️","💡","📌","🔒","🔑","🛡️","👑","🎯","📝","🔔","⏰","📊","🌍","🏠","💬","🗑️","📎","🖼️","🎬","📺","🎧","🎤","🎸","🎹","🎲","🎰","🎳","🏀","⚽","🏈","⚾","🎾","🏐","🏓","🥊","🏋️","🚴","🏊","🏄","🧗","🎿","🏆","🥇","🥈","🥉","🏅","🎖️","🏵️","🎗️","🎫","🎟️","🎪","🤹","🎭","🎨","🎬","🎤","🎧","🎼","🎹","🥁","🎷","🎺","🎸","🪕","🎻","🎲","♟️","🎯","🎳","🎮","🎰","🧩","🧸","🪀","🪁","🔮","🪄","🧿","💈","🔭","🔬","🕳️","💊","💉","🩸","🧬","🦠","🧫","🧪","🌡️","🧹","🧺","🧻","🚽","🚰","🚿","🛁","🛀","🧼","🪒","🧽","🧴","🛎️","🔑","🗝️","🚪","🪑","🛋️","🛏️","🧸","🖼️","🛍️","🛒","🎁","🎈","🎏","🎀","🎊","🎉","🎎","🏮","🎐","🧧","✉️","📩","📨","📧","💌","📥","📤","📦","🏷️","📪","📫","📬","📭","📮","📯","📜","📃","📄","📑","🧾","📊","📈","📉","🗒️","🗓️","📆","📅","🗑️","📇","🗃️","🗳️","🗄️","📋","📁","📂","🗂️","🗞️","📰","📓","📔","📒","📕","📗","📘","📙","📚","📖","🔖","🧷","🔗","📎","🖇️","📐","📏","🧮","📌","📍","✂️","🖊️","🖋️","✒️","🖌️","🖍️","📝","✏️","🔍","🔎","🔏","🔐","🔒","🔓"];
-
-  emojis.forEach(e => {
-    const btn = document.createElement("button");
-    btn.textContent = e;
-    btn.addEventListener("click", () => {
-      $("message-input").value += e;
-      $("message-input").focus();
-    });
-    picker.appendChild(btn);
-  });
-
-  document.querySelector(".chat-main").appendChild(picker);
+function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {
+  const overlay = $("modal-overlay");
+  $("modal-title").textContent = title;
+  $("modal-body").innerHTML = bodyHtml;
+  const confirmBtn = $("modal-confirm");
+  confirmBtn.textContent = confirmText;
+  confirmBtn.onclick = () => {
+    overlay.classList.add("hidden");
+    onConfirm();
+  };
+  $("modal-cancel").onclick = () => overlay.classList.add("hidden");
+  overlay.classList.remove("hidden");
 }
 
 // ============ CREATE ROOM ============
@@ -676,21 +698,21 @@ window.__deleteMessage = async (roomId, msgId) => {
 
 // ============ NAVIGATION ============
 function initNavigation() {
-  $("back-btn").addEventListener("click", () => {
-    detachActiveListeners();
-    if (presenceRef) {
-      remove(presenceRef);
-      presenceRef = null;
-    }
-    if (typingRef) {
-      remove(typingRef);
-      typingRef = null;
-    }
-    currentRoom = null;
-    currentRoomId = null;
-    $("messages").innerHTML = "";
-    showScreen("lobby");
-    loadRooms();
+  $("back-btn").addEventListener("click", leaveRoom);
+
+  $("close-room-btn").addEventListener("click", () => {
+    if (!currentRoomId) return;
+    showConfirmModal(
+      `Close "${currentRoom?.name}"?`,
+      `<p style="color:var(--text-secondary)">This deletes the room and all its messages for everyone. This can't be undone.</p>`,
+      "Delete Room",
+      async () => {
+        const roomId = currentRoomId;
+        leaveRoom();
+        await remove(ref(db, `rooms/${roomId}`));
+        showToast("Room closed");
+      }
+    );
   });
 }
 
