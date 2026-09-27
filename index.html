@@ -6,6 +6,13 @@
   <title>VibeChat</title>
   <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+  <script>
+    // Apply saved theme before first paint (no flash)
+    try {
+      var t = localStorage.getItem("vibechat-theme");
+      if (t && t !== "purple") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <!-- ============ AUTH SCREEN ============ -->
@@ -46,6 +53,10 @@
           <span id="current-username"></span>
           <button id="profile-btn" class="btn btn-ghost">Profile</button>
           <button id="games-btn" class="btn btn-ghost">🎮 Games</button>
+          <div class="theme-wrap">
+            <button id="theme-btn" class="btn btn-ghost" title="Colour themes">🎨</button>
+            <div id="theme-panel" class="theme-panel hidden"></div>
+          </div>
           <button id="admin-btn" class="btn btn-ghost hidden">🛡️ Admin</button>
           <button id="logout-btn" class="btn btn-ghost">Log Out</button>
         </div>

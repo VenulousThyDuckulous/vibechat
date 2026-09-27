@@ -21,6 +21,7 @@ A chill place to hang out and chat in real time.
 - 🎮 Minigames with leaderboards
 - 🗑️ Mods can delete messages right from chat
 - 🌙 Dark mode built in
+- 🎨 Colour themes (including light mode)
 - 👑 Room creators can close their own rooms
 - 🛡️ Moderation — admins can remove bad rooms and messages, the owner can ban users
 

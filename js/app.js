@@ -1155,6 +1155,56 @@ window.__deleteMessage = async (roomId, msgId) => {
   loadAdminData();
 };
 
+// ============ COLOUR THEMES ============
+const THEMES = [
+  { id: "purple", name: "Midnight Purple", color: "#7c6cf0" },
+  { id: "ocean", name: "Ocean Blue", color: "#3aa8e0" },
+  { id: "mint", name: "Mint Green", color: "#3ecf8e" },
+  { id: "sunset", name: "Sunset Orange", color: "#f07830" },
+  { id: "rose", name: "Rose Pink", color: "#ec5f8c" },
+  { id: "daylight", name: "Daylight", color: "#f2f2f7" }
+];
+
+function currentTheme() {
+  return localStorage.getItem("vibechat-theme") || "purple";
+}
+
+function applyTheme(id) {
+  if (!THEMES.some(t => t.id === id)) id = "purple";
+  if (id === "purple") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", id);
+  localStorage.setItem("vibechat-theme", id);
+  document.querySelectorAll(".theme-row").forEach(row => {
+    const check = row.querySelector(".theme-check");
+    if (check) check.textContent = row.dataset.theme === id ? "✓" : "";
+  });
+}
+
+function initThemes() {
+  const panel = $("theme-panel");
+  panel.innerHTML = "<h4>Colour theme</h4>";
+  THEMES.forEach(t => {
+    const row = document.createElement("button");
+    row.className = "theme-row";
+    row.dataset.theme = t.id;
+    row.innerHTML = `<span class="theme-dot" style="background:${t.color}"></span> ${t.name} <span class="theme-check"></span>`;
+    row.addEventListener("click", () => {
+      applyTheme(t.id);
+      panel.classList.add("hidden");
+    });
+    panel.appendChild(row);
+  });
+  applyTheme(currentTheme());
+  $("theme-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!panel.classList.contains("hidden") && !e.target.closest(".theme-wrap")) {
+      panel.classList.add("hidden");
+    }
+  });
+}
 // ============ NAVIGATION ============
 function initNavigation() {
   $("back-btn").addEventListener("click", leaveRoom);
@@ -1185,6 +1235,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initAdmin();
   initNavigation();
   initGamesUI();
+  initThemes();
 });
 
 function initGamesUI() {

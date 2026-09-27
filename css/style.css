@@ -23,6 +23,114 @@
   --transition: 0.2s ease;
 }
 
+/* ============ COLOUR THEMES ============ */
+html[data-theme="ocean"] {
+  --accent: #3aa8e0;
+  --accent-hover: #55bcf0;
+  --accent-glow: rgba(58, 168, 224, 0.15);
+}
+
+html[data-theme="mint"] {
+  --accent: #3ecf8e;
+  --accent-hover: #55e0a0;
+  --accent-glow: rgba(62, 207, 142, 0.15);
+}
+
+html[data-theme="sunset"] {
+  --accent: #f07830;
+  --accent-hover: #f5904f;
+  --accent-glow: rgba(240, 120, 48, 0.15);
+}
+
+html[data-theme="rose"] {
+  --accent: #ec5f8c;
+  --accent-hover: #f279a0;
+  --accent-glow: rgba(236, 95, 140, 0.15);
+}
+
+html[data-theme="daylight"] {
+  --bg-primary: #f2f2f7;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e9e9f0;
+  --bg-hover: #e0e0ea;
+  --text-primary: #1a1a22;
+  --text-secondary: #55556a;
+  --text-muted: #9999ad;
+  --accent: #6c63ff;
+  --accent-hover: #7d75ff;
+  --accent-glow: rgba(108, 99, 255, 0.15);
+  --border: #dcdce6;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme="daylight"] #auth-screen {
+  background: linear-gradient(135deg, #f2f2f7 0%, #e2ddff 100%);
+}
+
+/* ============ THEME PICKER ============ */
+.theme-wrap {
+  position: relative;
+}
+
+.theme-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 220px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  box-shadow: var(--shadow);
+  z-index: 500;
+}
+
+.theme-panel.hidden {
+  display: none;
+}
+
+.theme-panel h4 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+}
+
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: var(--transition);
+  text-align: left;
+}
+
+.theme-row:hover {
+  background: var(--bg-hover);
+}
+
+.theme-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+
+.theme-check {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 700;
+}
+
 * {
   margin: 0;
   padding: 0;
