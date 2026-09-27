@@ -1162,6 +1162,7 @@ const THEMES = [
   { id: "mint", name: "Mint Green", color: "#3ecf8e" },
   { id: "sunset", name: "Sunset Orange", color: "#f07830" },
   { id: "rose", name: "Rose Pink", color: "#ec5f8c" },
+  { id: "retro", name: "Retro Terminal", color: "#00ff41" },
   { id: "daylight", name: "Daylight", color: "#f2f2f7" }
 ];
 
