@@ -2,7 +2,7 @@
 //  VibeChat — Main App Module
 // ============================================================
 
-import { auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
+import { auth, db, storage, ADMIN_UIDS, OWNER_USERNAMES, TENOR_API_KEY } from "./firebase-config.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -29,7 +29,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import {
   ref as storageRef,
-  uploadBytes,
+  uploadBytesResumable,
   getDownloadURL
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
@@ -522,6 +522,13 @@ function loadMessages(roomId) {
 
   onChildAdded(messagesRef, addedCb);
   trackListener(messagesRef, "child_added", addedCb);
+
+  // Vanish deleted messages live for everyone in the room
+  const removedCb = (snap) => {
+    document.querySelector(`.message[data-msg-id="${snap.key}"]`)?.remove();
+  };
+  onChildRemoved(messagesRef, removedCb);
+  trackListener(messagesRef, "child_removed", removedCb);
 }
 
 function appendMessage(msgId, msg) {
@@ -543,6 +550,22 @@ function appendMessage(msgId, msg) {
     <div class="message-bubble">${linkify(msg.text || "")}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
   `;
   container.appendChild(div);
+  if (isAdmin) {
+    const header = div.querySelector(".message-header");
+    const del = document.createElement("button");
+    del.className = "msg-delete";
+    del.title = "Delete message";
+    del.textContent = "🗑️";
+    del.addEventListener("click", () => {
+      showConfirmModal(
+        "Delete this message?",
+        `<p style="color:var(--text-secondary)">${escapeHtml((msg.text || "").slice(0, 120))}</p>`,
+        "Delete",
+        () => remove(ref(db, `rooms/${currentRoomId}/messages/${msgId}`))
+      );
+    });
+    header.appendChild(del);
+  }
   container.scrollTop = container.scrollHeight;
 }
 
@@ -618,13 +641,24 @@ function initChat() {
     }
 
     const sendBtn = $("send-btn");
+    const attachBtn = $("attach-btn");
     sendBtn.disabled = true;
-    sendBtn.textContent = "Uploading…";
+    attachBtn.disabled = true;
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
       const sRef = storageRef(storage, `chat-files/${currentRoomId}/${Date.now()}_${safeName}`);
-      await uploadBytes(sRef, file);
-      const url = await getDownloadURL(sRef);
+      const task = uploadBytesResumable(sRef, file);
+      await new Promise((resolve, reject) => {
+        task.on("state_changed",
+          (snap) => {
+            const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+            sendBtn.textContent = `${pct}%`;
+          },
+          reject,
+          resolve
+        );
+      });
+      const url = await getDownloadURL(task.snapshot.ref);
       const isImage = file.type.startsWith("image/");
       const caption = $("message-input").value.trim();
       await push(ref(db, `rooms/${currentRoomId}/messages`), {
@@ -638,12 +672,16 @@ function initChat() {
       if (typingRef) remove(typingRef);
     } catch (err) {
       console.error("Upload failed:", err);
-      showToast("Upload failed — is Firebase Storage enabled?", "error");
+      showToast(`Upload failed (${err.code || err.message})`, "error");
     } finally {
       sendBtn.disabled = false;
       sendBtn.textContent = "Send";
+      attachBtn.disabled = false;
     }
   });
+
+  // GIF picker (Tenor)
+  $("gif-btn").addEventListener("click", toggleGifPicker);
 }
 
 function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {
@@ -658,6 +696,95 @@ function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {
   };
   $("modal-cancel").onclick = () => overlay.classList.add("hidden");
   overlay.classList.remove("hidden");
+}
+
+// ============ GIF PICKER (TENOR) ============
+function toggleGifPicker() {
+  let picker = document.querySelector(".gif-picker");
+  if (picker) {
+    picker.classList.toggle("hidden");
+    return;
+  }
+
+  picker = document.createElement("div");
+  picker.className = "gif-picker";
+  picker.innerHTML = `
+    <div class="gif-search-row">
+      <input type="text" id="gif-search" placeholder="Search GIFs..." autocomplete="off" />
+    </div>
+    <div class="gif-grid"></div>
+    <div class="gif-attrib">Powered by Tenor</div>
+  `;
+  document.querySelector(".chat-main").appendChild(picker);
+
+  const grid = picker.querySelector(".gif-grid");
+  const search = picker.querySelector("#gif-search");
+  let debounce;
+  search.addEventListener("input", () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => loadGifs(grid, search.value.trim()), 400);
+  });
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      clearTimeout(debounce);
+      loadGifs(grid, search.value.trim());
+    }
+  });
+  loadGifs(grid, "");
+}
+
+async function loadGifs(grid, q) {
+  if (!TENOR_API_KEY || TENOR_API_KEY === "YOUR_TENOR_KEY") {
+    grid.innerHTML = '<p class="gif-status">GIFs need a Tenor API key — ask the owner to add one.</p>';
+    return;
+  }
+  grid.innerHTML = '<p class="gif-status">Loading…</p>';
+  try {
+    const endpoint = q
+      ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${TENOR_API_KEY}&limit=20&media_filter=tinygif,gif`
+      : `https://tenor.googleapis.com/v2/featured?key=${TENOR_API_KEY}&limit=12&media_filter=tinygif,gif`;
+    const res = await fetch(endpoint);
+    if (!res.ok) throw new Error(`Tenor ${res.status}`);
+    const data = await res.json();
+    grid.innerHTML = "";
+    if (!data.results?.length) {
+      grid.innerHTML = '<p class="gif-status">No GIFs found.</p>';
+      return;
+    }
+    data.results.forEach(r => {
+      const tiny = r.media_formats?.tinygif?.url;
+      const full = r.media_formats?.gif?.url || tiny;
+      if (!tiny) return;
+      const img = document.createElement("img");
+      img.src = tiny;
+      img.loading = "lazy";
+      img.alt = r.content_description || "GIF";
+      img.addEventListener("click", () => sendGif(full));
+      grid.appendChild(img);
+    });
+  } catch (err) {
+    console.error("GIF load failed:", err);
+    grid.innerHTML = '<p class="gif-status">Could not load GIFs. Try again.</p>';
+  }
+}
+
+async function sendGif(url) {
+  if (!currentRoomId || isBanned || !currentUser) return;
+  const picker = document.querySelector(".gif-picker");
+  if (picker) picker.classList.add("hidden");
+  try {
+    await push(ref(db, `rooms/${currentRoomId}/messages`), {
+      uid: currentUser.uid,
+      username: getUsername(),
+      text: "🎬 GIF",
+      imageUrl: url,
+      timestamp: serverTimestamp()
+    });
+  } catch (err) {
+    console.error("GIF send failed:", err);
+    showToast("Could not send GIF", "error");
+  }
 }
 
 // ============ CREATE ROOM ============
