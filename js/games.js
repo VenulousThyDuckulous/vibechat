@@ -111,6 +111,172 @@ function overlayText(ctx, W, H, lines) {
   });
 }
 
+// ============ WAVE (ENDLESS, GD-STYLE) ============
+function createWave(stage, api) {
+  const W = 400, H = 520, PX = 100, PR = 6;
+  const c = makeCanvas(stage, W, H);
+  const ctx = c.getContext("2d");
+  let segs, gapY, gapHalf, speed, dist, trail, py, state, holding, raf, alive, lastScore;
+
+  function reset() {
+    gapY = H / 2;
+    gapHalf = 72;
+    speed = 3;
+    dist = 0;
+    trail = [];
+    lastScore = 0;
+    holding = false;
+    py = H / 2;
+    segs = [];
+    for (let x = -40; x <= W + 40; x += 8) {
+      segs.push({ x, top: gapY - gapHalf, bottom: gapY + gapHalf });
+    }
+    state = "ready";
+    api.setScore(0);
+  }
+
+  function press(down) {
+    if (!alive) return;
+    holding = down;
+    if (down && state === "over") {
+      reset();
+      state = "play";
+    } else if (down && state === "ready") {
+      state = "play";
+    }
+  }
+
+  function die() {
+    state = "over";
+    api.gameOver(lastScore);
+  }
+
+  function update() {
+    gapY += (Math.random() - 0.5) * 4;
+    const margin = gapHalf + 24;
+    if (gapY < margin) gapY = margin + Math.random() * 4;
+    if (gapY > H - margin) gapY = H - margin - Math.random() * 4;
+    dist += speed;
+    speed = Math.min(6, 3 + dist / 14000);
+    gapHalf = Math.max(46, 72 - dist / 2600);
+    for (const s of segs) s.x -= speed;
+    while (segs.length && segs[0].x < -16) segs.shift();
+    let last = segs[segs.length - 1];
+    while (last.x < W + 16) {
+      last = { x: last.x + 8, top: gapY - gapHalf, bottom: gapY + gapHalf };
+      segs.push(last);
+    }
+    py += holding ? -3.4 : 3.4;
+    trail.push({ x: PX, y: py });
+    if (trail.length > 42) trail.shift();
+    const score = Math.floor(dist / 50);
+    if (score !== lastScore) {
+      lastScore = score;
+      api.setScore(score);
+    }
+    if (py - PR < 0 || py + PR > H) {
+      die();
+      return;
+    }
+    let g = segs[0];
+    for (const s of segs) {
+      if (s.x <= PX) g = s;
+      else break;
+    }
+    if (py - PR < g.top || py + PR > g.bottom) die();
+  }
+
+  function draw() {
+    ctx.fillStyle = "#0f0f13";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(124,108,240,0.12)";
+    ctx.lineWidth = 1;
+    const off = -(dist % 40);
+    ctx.beginPath();
+    for (let x = off; x < W; x += 40) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#1e1e28";
+    ctx.beginPath();
+    ctx.moveTo(-8, -8);
+    for (const s of segs) ctx.lineTo(s.x, s.top);
+    ctx.lineTo(W + 8, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-8, H + 8);
+    for (const s of segs) ctx.lineTo(s.x, s.bottom);
+    ctx.lineTo(W + 8, H + 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#e055e0";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    segs.forEach((s, i) => (i === 0 ? ctx.moveTo(s.x, s.top) : ctx.lineTo(s.x, s.top)));
+    ctx.stroke();
+    ctx.beginPath();
+    segs.forEach((s, i) => (i === 0 ? ctx.moveTo(s.x, s.bottom) : ctx.lineTo(s.x, s.bottom)));
+    ctx.stroke();
+    for (let i = 0; i < trail.length; i++) {
+      const t = trail[i];
+      ctx.fillStyle = `rgba(78,205,196,${(i / trail.length) * 0.8})`;
+      ctx.fillRect(t.x - 2, t.y - 2, 4, 4);
+    }
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(PX - 6, py - 6, 12, 12);
+    ctx.fillStyle = "#4ecdc4";
+    ctx.fillRect(PX - 4, py - 4, 8, 8);
+    if (state === "ready") overlayText(ctx, W, H, ["Get Ready", "Hold to rise, release to fall"]);
+    else if (state === "over") overlayText(ctx, W, H, ["Wrecked", `Score: ${lastScore}`, "Hold to retry"]);
+  }
+
+  function loop() {
+    if (!alive) return;
+    if (state === "play") update();
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function onDown(e) {
+    e.preventDefault();
+    press(true);
+  }
+  function onUp() {
+    press(false);
+  }
+  function onKeyDown(e) {
+    if (e.code === "Space" || e.code === "ArrowUp") {
+      e.preventDefault();
+      if (!e.repeat) press(true);
+    }
+  }
+  function onKeyUp(e) {
+    if (e.code === "Space" || e.code === "ArrowUp") press(false);
+  }
+
+  reset();
+  alive = true;
+  c.addEventListener("pointerdown", onDown);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
+  loop();
+
+  return {
+    destroy() {
+      alive = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    }
+  };
+}
+
 // ============ FLAPPY BIRD ============
 function createFlappy(stage, api) {
   const W = 400, H = 520;
@@ -593,6 +759,7 @@ function createMemory(stage, api) {
 }
 
 const GAMES = {
+  wave: { name: "Wave", icon: "🌊", create: createWave },
   flappy: { name: "Flappy Bird", icon: "🐤", create: createFlappy },
   snake: { name: "Snake", icon: "🐍", create: createSnake },
   breakout: { name: "Breakout", icon: "🧱", create: createBreakout },
