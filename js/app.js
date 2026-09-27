@@ -143,7 +143,19 @@ async function handleLogin(e) {
   const password = $("login-password").value;
 
   try {
-    await signInWithEmailAndPassword(auth, usernameToEmail(username), password);
+    const cred = await signInWithEmailAndPassword(auth, usernameToEmail(username), password);
+    // Backfill profile if signup's DB write previously failed
+    try {
+      const snap = await get(ref(db, `users/${cred.user.uid}`));
+      if (!snap.exists()) {
+        await set(ref(db, `users/${cred.user.uid}`), {
+          username: username,
+          createdAt: serverTimestamp()
+        });
+      }
+    } catch (dbErr) {
+      console.error("Profile backfill failed:", dbErr);
+    }
   } catch (err) {
     console.error("Login failed:", err);
     showError(getAuthErrorMessage(err.code) + (err.code ? ` (${err.code})` : ""));
