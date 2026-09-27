@@ -710,6 +710,156 @@ input::placeholder {
   margin-bottom: 12px;
 }
 
+/* ============ GAMES ============ */
+.games-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.games-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.games-grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  padding: 24px;
+  align-content: start;
+}
+
+.game-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.game-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+  transform: translateY(-2px);
+}
+
+.game-emoji {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+
+.game-card h4 {
+  font-size: 1.1rem;
+  margin-bottom: 6px;
+}
+
+.game-card p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.game-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px 24px 24px;
+}
+
+.game-view.hidden {
+  display: none;
+}
+
+.game-view-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.game-view-header h3 {
+  flex: 1;
+}
+
+.game-score {
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 80px;
+  text-align: right;
+}
+
+.game-stage {
+  display: flex;
+  justify-content: center;
+}
+
+.game-canvas {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.game-leaderboard {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-top: 12px;
+  min-height: 1.2em;
+}
+
+/* Memory match */
+.mem-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  width: 100%;
+  max-width: 400px;
+  touch-action: manipulation;
+}
+
+.mem-card {
+  aspect-ratio: 1;
+  font-size: 2rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+  color: var(--text-primary);
+}
+
+.mem-card:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.mem-card.open,
+.mem-card.matched {
+  background: var(--bg-hover);
+}
+
+.mem-card.matched {
+  border-color: var(--success);
+  cursor: default;
+}
+
+button {
+  touch-action: manipulation;
+}
+
 /* ============ MODAL ============ */
 .modal-overlay {
   position: fixed;

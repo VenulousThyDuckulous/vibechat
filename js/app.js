@@ -3,6 +3,7 @@
 // ============================================================
 
 import { auth, db, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
+import { initGames, closeGame } from "./games.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -62,7 +63,8 @@ const screens = {
   auth: $("auth-screen"),
   lobby: $("lobby-screen"),
   chat: $("chat-screen"),
-  admin: $("admin-screen")
+  admin: $("admin-screen"),
+  games: $("games-screen")
 };
 
 // ============ UTILITIES ============
@@ -1020,4 +1022,14 @@ document.addEventListener("DOMContentLoaded", () => {
   initCreateRoom();
   initAdmin();
   initNavigation();
+  initGamesUI();
 });
+
+function initGamesUI() {
+  initGames();
+  $("games-btn").addEventListener("click", () => showScreen("games"));
+  $("games-back-btn").addEventListener("click", () => {
+    closeGame();
+    showScreen("lobby");
+  });
+}

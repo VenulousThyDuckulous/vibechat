@@ -45,6 +45,7 @@
           <span id="header-avatar" class="avatar avatar-header"></span>
           <span id="current-username"></span>
           <button id="profile-btn" class="btn btn-ghost">Profile</button>
+          <button id="games-btn" class="btn btn-ghost">🎮 Games</button>
           <button id="admin-btn" class="btn btn-ghost hidden">🛡️ Admin</button>
           <button id="logout-btn" class="btn btn-ghost">Log Out</button>
         </div>
@@ -76,6 +77,49 @@
             <button type="submit" class="btn btn-primary">Create Room</button>
           </form>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GAMES ============ -->
+  <div id="games-screen" class="screen">
+    <div class="games-container">
+      <header class="games-header">
+        <div class="logo-small">🎮 Games</div>
+        <button id="games-back-btn" class="btn btn-ghost">← Lobby</button>
+      </header>
+
+      <div id="games-grid" class="games-grid">
+        <div class="game-card" data-game="flappy">
+          <div class="game-emoji">🐤</div>
+          <h4>Flappy Bird</h4>
+          <p>Tap, click, or Space to flap through the pipes</p>
+        </div>
+        <div class="game-card" data-game="snake">
+          <div class="game-emoji">🐍</div>
+          <h4>Snake</h4>
+          <p>Arrows/WASD or swipe to eat and grow</p>
+        </div>
+        <div class="game-card" data-game="breakout">
+          <div class="game-emoji">🧱</div>
+          <h4>Breakout</h4>
+          <p>Move the paddle with mouse, touch, or arrows</p>
+        </div>
+        <div class="game-card" data-game="memory">
+          <div class="game-emoji">🃏</div>
+          <h4>Memory Match</h4>
+          <p>Flip the cards and match all 8 pairs</p>
+        </div>
+      </div>
+
+      <div id="game-view" class="game-view hidden">
+        <div class="game-view-header">
+          <button id="game-close-btn" class="btn btn-ghost">← Games</button>
+          <h3 id="game-title"></h3>
+          <span id="game-score" class="game-score"></span>
+        </div>
+        <div id="game-stage" class="game-stage"></div>
+        <div id="game-leaderboard" class="game-leaderboard"></div>
       </div>
     </div>
   </div>
