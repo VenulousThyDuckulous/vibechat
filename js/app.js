@@ -36,6 +36,7 @@ let isAdmin = false;
 let isOwner = false;
 let isBanned = false;
 let adminUids = new Set(ADMIN_UIDS);
+let userCache = {};
 let presenceRef = null;
 let typingRef = null;
 let messageListeners = [];
@@ -102,6 +103,66 @@ async function refreshAdminList() {
     console.error("Admin list refresh failed:", err);
     adminUids = new Set(ADMIN_UIDS);
   }
+}
+
+// Refresh the uid -> { username, photoURL } cache for avatars
+async function refreshUserCache() {
+  try {
+    const snap = await get(ref(db, "users"));
+    userCache = snap.val() || {};
+  } catch (err) {
+    console.error("User cache refresh failed:", err);
+  }
+}
+
+function avatarHue(name) {
+  let h = 0;
+  for (const c of (name || "?")) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+
+function avatarInner(name, photo) {
+  if (photo) return `<img src="${escapeHtml(photo)}" alt="" />`;
+  const initial = ((name || "?").trim().charAt(0) || "?").toUpperCase();
+  return `<span class="avatar-initial" style="background:hsl(${avatarHue(name)},45%,45%)">${escapeHtml(initial)}</span>`;
+}
+
+function paintAvatars(uid) {
+  const profile = userCache[uid] || {};
+  document.querySelectorAll(`.avatar[data-uid="${uid}"]`).forEach(el => {
+    el.innerHTML = avatarInner(el.dataset.name || profile.username || "?", profile.photoURL);
+  });
+}
+
+function paintHeaderAvatar() {
+  const el = $("header-avatar");
+  if (!el || !currentUser) return;
+  el.dataset.uid = currentUser.uid;
+  el.dataset.name = getUsername();
+  el.innerHTML = avatarInner(getUsername(), (userCache[currentUser.uid] || {}).photoURL);
+}
+
+// Downscale an image file to a small square JPEG data URL (no Storage needed)
+function processAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const size = 128;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const side = Math.min(img.width, img.height);
+      canvas.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+      resolve(canvas.toDataURL("image/jpeg", 0.8));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not read image"));
+    };
+    img.src = objectUrl;
+  });
 }
 
 function formatTime(ts) {
@@ -297,6 +358,8 @@ async function loadUserProfile() {
     }
   }
   await refreshAdminList();
+  await refreshUserCache();
+  paintHeaderAvatar();
 
   // Live ban enforcement — get kicked even mid-session
   const myBanRef = ref(db, `banned/${currentUser.uid}`);
@@ -376,7 +439,7 @@ function handleJoinRoom(roomId, data) {
   if (data.isPrivate) {
     showPasswordModal(roomId, data);
   } else {
-    joinRoom(roomId, data);
+    joinRoom(roomId, data).catch(err => console.error("Join failed:", err));
   }
 }
 
@@ -395,7 +458,7 @@ function showPasswordModal(roomId, data) {
     const hashed = await simpleHash(pw);
     if (hashed === data.passwordHash) {
       overlay.classList.add("hidden");
-      joinRoom(roomId, data);
+      joinRoom(roomId, data).catch(err => console.error("Join failed:", err));
     } else {
       showToast("Wrong room password", "error");
     }
@@ -414,7 +477,7 @@ async function simpleHash(str) {
   return hash.toString(36);
 }
 
-function joinRoom(roomId, data) {
+async function joinRoom(roomId, data) {
   detachActiveListeners();
   currentRoomId = roomId;
   currentRoom = data;
@@ -423,6 +486,7 @@ function joinRoom(roomId, data) {
   const canClose = currentUser.uid === data.createdBy || isAdmin;
   $("close-room-btn").classList.toggle("hidden", !canClose);
   showScreen("chat");
+  await refreshUserCache();
   watchRoomExists(roomId);
   setupPresence(roomId);
   loadMessages(roomId);
@@ -485,9 +549,9 @@ function setupPresence(roomId) {
     const count = Object.keys(users).length;
     $("online-count").textContent = count;
 
-    Object.values(users).forEach(u => {
+    Object.entries(users).forEach(([uid, u]) => {
       const li = document.createElement("li");
-      li.innerHTML = `<span class="online-dot"></span> ${escapeHtml(u.username)}`;
+      li.innerHTML = `<span class="online-dot"></span><span class="avatar" data-uid="${escapeHtml(uid)}" data-name="${escapeHtml(u.username)}">${avatarInner(u.username, (userCache[uid] || {}).photoURL)}</span> ${escapeHtml(u.username)}`;
       list.appendChild(li);
     });
   };
@@ -538,6 +602,7 @@ function appendMessage(msgId, msg) {
 
   div.innerHTML = `
     <div class="message-header">
+      <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
       <span class="message-username">${escapeHtml(msg.username)}</span>
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
@@ -633,6 +698,77 @@ function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {
   };
   $("modal-cancel").onclick = () => overlay.classList.add("hidden");
   overlay.classList.remove("hidden");
+}
+
+// ============ PROFILE PICTURE ============
+let pendingAvatar = null;
+
+function openProfileModal() {
+  const overlay = $("modal-overlay");
+  const currentPhoto = (userCache[currentUser.uid] || {}).photoURL || null;
+  pendingAvatar = null;
+  $("modal-title").textContent = "Your Profile";
+  $("modal-body").innerHTML = `
+    <div class="profile-preview"><span id="profile-preview-avatar" class="avatar avatar-lg">${avatarInner(getUsername(), currentPhoto)}</span></div>
+    <p style="margin-bottom:12px;color:var(--text-secondary);text-align:center">${escapeHtml(getUsername())}</p>
+    <input type="file" id="profile-file" accept="image/*" style="width:100%;margin-bottom:12px" />
+    <button id="profile-remove" class="btn btn-ghost btn-small" ${currentPhoto ? "" : "disabled"}>Remove picture</button>
+  `;
+  const confirmBtn = $("modal-confirm");
+  confirmBtn.textContent = "Save";
+  confirmBtn.onclick = saveProfileAvatar;
+  $("modal-cancel").onclick = () => overlay.classList.add("hidden");
+  overlay.classList.remove("hidden");
+
+  $("profile-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Image must be under 5MB", "error");
+      return;
+    }
+    try {
+      pendingAvatar = await processAvatar(file);
+      $("profile-preview-avatar").innerHTML = avatarInner(getUsername(), pendingAvatar);
+    } catch (err) {
+      console.error("Avatar processing failed:", err);
+      showToast("Could not read that image", "error");
+    }
+  });
+
+  $("profile-remove").addEventListener("click", async () => {
+    try {
+      await update(ref(db, `users/${currentUser.uid}`), { photoURL: null });
+      if (userCache[currentUser.uid]) userCache[currentUser.uid].photoURL = null;
+      overlay.classList.add("hidden");
+      paintHeaderAvatar();
+      paintAvatars(currentUser.uid);
+      showToast("Profile picture removed");
+    } catch (err) {
+      console.error("Avatar remove failed:", err);
+      showToast(`Could not remove picture (${err.code || err.message})`, "error");
+    }
+  });
+}
+
+async function saveProfileAvatar() {
+  if (!pendingAvatar) {
+    $("modal-overlay").classList.add("hidden");
+    return;
+  }
+  try {
+    await update(ref(db, `users/${currentUser.uid}`), { photoURL: pendingAvatar });
+    if (!userCache[currentUser.uid]) userCache[currentUser.uid] = {};
+    userCache[currentUser.uid].photoURL = pendingAvatar;
+    userCache[currentUser.uid].username = getUsername();
+    $("modal-overlay").classList.add("hidden");
+    paintHeaderAvatar();
+    paintAvatars(currentUser.uid);
+    showToast("Profile picture updated");
+  } catch (err) {
+    console.error("Avatar save failed:", err);
+    showToast(`Could not save picture (${err.code || err.message})`, "error");
+  }
 }
 
 // ============ CREATE ROOM ============
@@ -735,6 +871,12 @@ async function loadAdminData() {
     info.className = "admin-item-info";
     const badges = `${userIsOwner ? '<span class="message-admin-badge">OWNER</span>' : userIsAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""} ${userIsBanned ? '<span class="message-admin-badge">BANNED</span>' : ""}`;
     info.innerHTML = `<h5>${escapeHtml(data.username)} ${badges}</h5><p>UID: ${escapeHtml(id.slice(0, 12))}...</p>`;
+    const av = document.createElement("span");
+    av.className = "avatar";
+    av.dataset.uid = id;
+    av.dataset.name = data.username;
+    av.innerHTML = avatarInner(data.username, data.photoURL);
+    item.appendChild(av);
     item.appendChild(info);
 
     const actions = document.createElement("div");
@@ -851,6 +993,8 @@ window.__deleteMessage = async (roomId, msgId) => {
 // ============ NAVIGATION ============
 function initNavigation() {
   $("back-btn").addEventListener("click", leaveRoom);
+
+  $("profile-btn").addEventListener("click", openProfileModal);
 
   $("close-room-btn").addEventListener("click", () => {
     if (!currentRoomId) return;

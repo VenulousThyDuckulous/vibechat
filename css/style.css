@@ -647,6 +647,69 @@ input::placeholder {
   font-style: italic;
 }
 
+/* ============ AVATARS ============ */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-initial {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+}
+
+.avatar-header {
+  width: 30px;
+  height: 30px;
+  font-size: 0.85rem;
+}
+
+.message-header .avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 0.7rem;
+}
+
+.online-list .avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 0.7rem;
+}
+
+.admin-item .avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 0.85rem;
+}
+
+.avatar-lg {
+  width: 72px;
+  height: 72px;
+  font-size: 1.8rem;
+}
+
+.profile-preview {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
 /* ============ MODAL ============ */
 .modal-overlay {
   position: fixed;
