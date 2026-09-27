@@ -621,6 +621,43 @@ input::placeholder {
   color: #d0d0ff;
 }
 
+/* ============ MENTIONS ============ */
+.mention {
+  background: rgba(240, 192, 96, 0.22);
+  color: var(--warning);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mention.me {
+  background: var(--warning);
+  color: #000;
+}
+
+.message.mentioned .message-bubble {
+  background: rgba(240, 192, 96, 0.16);
+  border-left: 3px solid var(--warning);
+}
+
+.room-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mention-badge {
+  background: var(--warning);
+  color: #000;
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 3px 9px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
 .message-admin-badge {
   font-size: 0.7rem;
   background: var(--warning);

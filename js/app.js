@@ -42,6 +42,7 @@ let isOwner = false;
 let isBanned = false;
 let adminUids = new Set(ADMIN_UIDS);
 let userCache = {};
+let mentionCounts = {};
 let presenceRef = null;
 let typingRef = null;
 let messageListeners = [];
@@ -206,9 +207,57 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function linkify(text) {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  return escapeHtml(text).replace(urlRegex, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const URL_RE = /(https?:\/\/[^\s<]+)/g;
+const MENTION_RE = /@([A-Za-z0-9_][A-Za-z0-9_ |.\-]{2,19})/g;
+
+function findUserByName(name) {
+  const want = (name || "").trim().toLowerCase().replace(/[ .|\-]+$/, "");
+  if (!want) return null;
+  for (const [uid, u] of Object.entries(userCache)) {
+    if ((u.username || "").toLowerCase() === want) return { uid, username: u.username };
+  }
+  return null;
+}
+
+function extractMentionedUids(text) {
+  const uids = new Set();
+  (text || "").replace(MENTION_RE, (m, name) => {
+    const hit = findUserByName(name);
+    if (hit && currentUser && hit.uid !== currentUser.uid) uids.add(hit.uid);
+    return m;
+  });
+  return [...uids];
+}
+
+function messageMentionsMe(text) {
+  const myName = getUsername().toLowerCase();
+  let found = false;
+  (text || "").replace(MENTION_RE, (m, name) => {
+    const hit = findUserByName(name);
+    if (hit && hit.username.toLowerCase() === myName) found = true;
+    return m;
+  });
+  return found;
+}
+
+function renderMessageText(raw) {
+  const esc = escapeHtml(raw || "");
+  const urls = [];
+  const noUrls = esc.replace(URL_RE, (m) => {
+    urls.push(m);
+    return `\u0000${urls.length - 1}\u0000`;
+  });
+  const myName = getUsername().toLowerCase();
+  const withMentions = noUrls.replace(MENTION_RE, (m, name) => {
+    const hit = findUserByName(name);
+    if (!hit) return m;
+    const me = hit.username.toLowerCase() === myName;
+    return `<span class="mention${me ? " me" : ""}">@${escapeHtml(hit.username)}</span>`;
+  });
+  return withMentions.replace(/\u0000(\d+)\u0000/g, (_, i) => {
+    const u = urls[+i];
+    return `<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
+  });
 }
 
 // ============ AUTH ============
@@ -478,6 +527,29 @@ function loadRooms() {
   onChildRemoved(roomsRef, removedCb);
   roomListeners.push({ ref: roomsRef, event: "child_added", cb: addedCb });
   roomListeners.push({ ref: roomsRef, event: "child_removed", cb: removedCb });
+
+  // Unread mention counts for the lobby badges
+  const mentionsRef = ref(db, `mentions/${currentUser.uid}`);
+  const mentionsCb = (snap) => {
+    const data = snap.val() || {};
+    mentionCounts = {};
+    for (const [roomId, msgs] of Object.entries(data)) {
+      mentionCounts[roomId] = Object.keys(msgs || {}).length;
+    }
+    updateMentionBadges();
+  };
+  onValue(mentionsRef, mentionsCb);
+  roomListeners.push({ ref: mentionsRef, event: "value", cb: mentionsCb });
+}
+
+function updateMentionBadges() {
+  document.querySelectorAll("#room-list .room-card").forEach(card => {
+    const count = mentionCounts[card.dataset.roomId] || 0;
+    const badge = card.querySelector(".mention-badge");
+    if (!badge) return;
+    badge.textContent = count > 0 ? `🔔 ${count}` : "";
+    badge.classList.toggle("hidden", count === 0);
+  });
 }
 
 function addRoomToList(roomId, data) {
@@ -493,10 +565,14 @@ function addRoomToList(roomId, data) {
       <h4>${escapeHtml(data.name)}</h4>
       <p>${data.isPrivate ? "🔒 Private" : "🌍 Public"} · ${data.memberCount || 0} members</p>
     </div>
-    <span class="room-card-badge ${data.isPrivate ? "private" : ""}">${data.isPrivate ? "🔒" : "🌍"}</span>
+    <div class="room-badges">
+      <span class="mention-badge hidden"></span>
+      <span class="room-card-badge ${data.isPrivate ? "private" : ""}">${data.isPrivate ? "🔒" : "🌍"}</span>
+    </div>
   `;
   card.addEventListener("click", () => handleJoinRoom(roomId, data));
   list.appendChild(card);
+  updateMentionBadges();
 }
 
 function removeRoomFromList(roomId) {
@@ -560,6 +636,8 @@ async function joinRoom(roomId, data) {
   $("close-room-btn").classList.toggle("hidden", !canClose);
   showScreen("chat");
   await refreshUserCache();
+  // Opening the room marks its mentions as read
+  remove(ref(db, `mentions/${currentUser.uid}/${roomId}`)).catch(() => {});
   watchRoomExists(roomId);
   setupPresence(roomId);
   loadMessages(roomId);
@@ -680,8 +758,9 @@ function appendMessage(msgId, msg) {
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
-    <div class="message-bubble">${linkify(msg.text || "")}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
+    <div class="message-bubble">${renderMessageText(msg.text)}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
   `;
+  if (messageMentionsMe(msg.text)) div.classList.add("mentioned");
   container.appendChild(div);
   if (isAdmin) {
     const header = div.querySelector(".message-header");
@@ -747,12 +826,23 @@ function initChat() {
     if (!text || !currentRoomId) return;
 
     const messagesRef = ref(db, `rooms/${currentRoomId}/messages`);
-    await push(messagesRef, {
+    const msgRef = await push(messagesRef, {
       uid: currentUser.uid,
       username: getUsername(),
       text: text,
       timestamp: serverTimestamp()
     });
+    // Notify mentioned users (unread badge on their lobby room card)
+    try {
+      for (const uid of extractMentionedUids(text)) {
+        await set(ref(db, `mentions/${uid}/${currentRoomId}/${msgRef.key}`), {
+          by: getUsername(),
+          at: serverTimestamp()
+        });
+      }
+    } catch (err) {
+      console.error("Mention notify failed:", err);
+    }
 
     input.value = "";
     if (typingRef) remove(typingRef);
