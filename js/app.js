@@ -40,6 +40,7 @@ let currentRoomId = null;
 let isAdmin = false;
 let isOwner = false;
 let isBanned = false;
+let adminUids = new Set(ADMIN_UIDS);
 let presenceRef = null;
 let typingRef = null;
 let messageListeners = [];
@@ -94,6 +95,18 @@ function usernameToEmail(username) {
 
 function isOwnerName(name) {
   return OWNER_USERNAMES.some(o => o.toLowerCase() === (name || "").toLowerCase());
+}
+
+// Refresh the known admin UID list (hardcoded + DB-granted) for badges
+async function refreshAdminList() {
+  try {
+    const snap = await get(ref(db, "admins"));
+    const data = snap.val() || {};
+    adminUids = new Set([...ADMIN_UIDS, ...Object.keys(data).filter(k => data[k] === true)]);
+  } catch (err) {
+    console.error("Admin list refresh failed:", err);
+    adminUids = new Set(ADMIN_UIDS);
+  }
 }
 
 function formatTime(ts) {
@@ -288,6 +301,7 @@ async function loadUserProfile() {
       console.error("Admin check failed:", err);
     }
   }
+  await refreshAdminList();
 
   // Live ban enforcement — get kicked even mid-session
   const myBanRef = ref(db, `banned/${currentUser.uid}`);
@@ -517,7 +531,7 @@ function appendMessage(msgId, msg) {
   div.className = `message ${isOwn ? "own" : "other"}`;
   div.dataset.msgId = msgId;
 
-  const isMsgAdmin = ADMIN_UIDS.includes(msg.uid);
+  const isMsgAdmin = adminUids.has(msg.uid);
   const isMsgOwner = !isMsgAdmin && isOwnerName(msg.username);
 
   div.innerHTML = `
@@ -703,6 +717,7 @@ function initAdmin() {
 }
 
 async function loadAdminData() {
+  await refreshAdminList();
   // Load all rooms
   const roomsSnap = await get(ref(db, "rooms"));
   const rooms = roomsSnap.val() || {};
@@ -736,7 +751,7 @@ async function loadAdminData() {
   Object.entries(users).forEach(([id, data]) => {
     const item = document.createElement("div");
     item.className = "admin-item";
-    const userIsAdmin = ADMIN_UIDS.includes(id);
+    const userIsAdmin = adminUids.has(id);
     const userIsOwner = isOwnerName(data.username);
     const userIsBanned = !!banned[id];
     const isSelf = id === currentUser.uid;
