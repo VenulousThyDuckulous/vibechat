@@ -31,7 +31,7 @@ const OWNER_USERNAMES = [
 
 // Web Push (VAPID) key for background notifications — free, generate at:
 // Firebase Console → Project settings → Cloud Messaging → Web Push certificates
-const VAPID_KEY = "YOUR_VAPID_KEY";
+const VAPID_KEY = "BO4_Vl4EIk3rInui70Epl_-Nq713sh4wvHdcTgDX-f47ohGu7xgWmeJBx9sW-CdczzbVFGMJtLaDA1egrsF1uVs";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
