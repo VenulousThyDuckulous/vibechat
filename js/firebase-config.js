@@ -8,13 +8,13 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-aut
 import { getDatabase } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyABcRHJYvAV75pQAieSzL5vTBTD52r8kRM",
+  authDomain: "vibechat-a2d59.firebaseapp.com",
+  databaseURL: "https://vibechat-a2d59-default-rtdb.firebaseio.com",
+  projectId: "vibechat-a2d59",
+  storageBucket: "vibechat-a2d59.firebasestorage.app",
+  messagingSenderId: "1094675039349",
+  appId: "1:1094675039349:web:64a3a3a22d46d93df2a43c"
 };
 
 // Admin UIDs — add your Firebase Auth UID here for admin access.
