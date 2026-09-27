@@ -75,11 +75,11 @@ function showScreen(name) {
   screens[name].classList.add("active");
 }
 
-function showToast(msg, type = "success") {
+function showToast(msg, type = "success", ms = 3000) {
   const toast = $("toast");
   toast.textContent = msg;
   toast.className = `toast ${type}`;
-  setTimeout(() => toast.classList.add("hidden"), 3000);
+  setTimeout(() => toast.classList.add("hidden"), ms);
 }
 
 function showError(msg) {
@@ -645,20 +645,44 @@ function initChat() {
     const attachBtn = $("attach-btn");
     sendBtn.disabled = true;
     attachBtn.disabled = true;
+    let finished = false;
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
       const sRef = storageRef(storage, `chat-files/${currentRoomId}/${Date.now()}_${safeName}`);
+      console.log("Upload starting:", sRef.fullPath, file.size, "bytes");
       const task = uploadBytesResumable(sRef, file);
+      let lastMove = Date.now();
+      const watchdog = setInterval(() => {
+        if (finished) {
+          clearInterval(watchdog);
+          return;
+        }
+        if (Date.now() - lastMove > 20000) {
+          clearInterval(watchdog);
+          console.error("Upload stalled: no bytes moved for 20s");
+          task.cancel();
+          showToast("Upload stalled — no data sent in 20s. Check adblocker/VPN, and that Firebase Storage is enabled.", "error", 6000);
+        }
+      }, 5000);
       await new Promise((resolve, reject) => {
         task.on("state_changed",
           (snap) => {
-            const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+            lastMove = Date.now();
+            const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0;
             sendBtn.textContent = `${pct}%`;
+            console.log(`Upload: ${snap.bytesTransferred}/${snap.totalBytes} state=${snap.state}`);
           },
-          reject,
-          resolve
+          (err) => {
+            clearInterval(watchdog);
+            reject(err);
+          },
+          () => {
+            clearInterval(watchdog);
+            resolve();
+          }
         );
       });
+      finished = true;
       const url = await getDownloadURL(task.snapshot.ref);
       const isImage = file.type.startsWith("image/");
       const caption = $("message-input").value.trim();
@@ -672,8 +696,10 @@ function initChat() {
       $("message-input").value = "";
       if (typingRef) remove(typingRef);
     } catch (err) {
+      finished = true;
+      if (err.code === "storage/canceled") return; // watchdog already showed why
       console.error("Upload failed:", err);
-      showToast(`Upload failed (${err.code || err.message})`, "error");
+      showToast(`Upload failed (${err.code || err.message})`, "error", 6000);
     } finally {
       sendBtn.disabled = false;
       sendBtn.textContent = "Send";
