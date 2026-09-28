@@ -18,6 +18,7 @@ A chill place to hang out and chat in real time.
 - 🟢 See who's online in each room
 - ⌨️ Typing indicators
 - 🖼️ Profile pictures, username & password changes
+- 📝 Profile bios (click any avatar to view)
 - 📣 @mentions + owner-only @everyone, with unread badges
 - ↩️ Message replies that ping the author
 - 🎬 GIFs (Giphy)

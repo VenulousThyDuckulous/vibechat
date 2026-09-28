@@ -1241,6 +1241,10 @@ function openProfileModal() {
     <input type="file" id="profile-file" accept="image/*" style="width:100%;margin-bottom:12px" />
     <button id="profile-remove" class="btn btn-ghost btn-small" ${currentPhoto ? "" : "disabled"}>Remove picture</button>
     <div class="profile-section">
+      <h4>Bio</h4>
+      <textarea id="profile-bio" maxlength="150" rows="3" placeholder="Say something about yourself..."></textarea>
+    </div>
+    <div class="profile-section">
       <h4>Change username</h4>
       <input type="text" id="profile-username" maxlength="20" placeholder="New username" autocomplete="off" />
       <button id="profile-username-save" class="btn btn-primary btn-small">Change Username</button>
@@ -1254,10 +1258,13 @@ function openProfileModal() {
     </div>
   `;
   const confirmBtn = $("modal-confirm");
+  confirmBtn.style.display = "";
   confirmBtn.textContent = "Save";
-  confirmBtn.onclick = saveProfileAvatar;
+  confirmBtn.onclick = saveProfile;
+  $("modal-cancel").textContent = "Cancel";
   $("modal-cancel").onclick = () => overlay.classList.add("hidden");
   overlay.classList.remove("hidden");
+  $("profile-bio").value = (userCache[currentUser.uid] || {}).bio || "";
 
   $("profile-file").addEventListener("change", async (e) => {
     const file = e.target.files[0];
@@ -1293,24 +1300,48 @@ function openProfileModal() {
   $("profile-pw-save").addEventListener("click", changePassword);
 }
 
-async function saveProfileAvatar() {
-  if (!pendingAvatar) {
-    $("modal-overlay").classList.add("hidden");
+async function saveProfile() {
+  const overlay = $("modal-overlay");
+  const bioEl = $("profile-bio");
+  const updates = {};
+  if (bioEl) updates.bio = bioEl.value.trim().slice(0, 150);
+  if (pendingAvatar) updates.photoURL = pendingAvatar;
+  if (!Object.keys(updates).length) {
+    overlay.classList.add("hidden");
     return;
   }
   try {
-    await update(ref(db, `users/${currentUser.uid}`), { photoURL: pendingAvatar });
+    await update(ref(db, `users/${currentUser.uid}`), updates);
     if (!userCache[currentUser.uid]) userCache[currentUser.uid] = {};
-    userCache[currentUser.uid].photoURL = pendingAvatar;
+    Object.assign(userCache[currentUser.uid], updates);
     userCache[currentUser.uid].username = getUsername();
-    $("modal-overlay").classList.add("hidden");
+    overlay.classList.add("hidden");
     paintHeaderAvatar();
     paintAvatars(currentUser.uid);
-    showToast("Profile picture updated");
+    showToast("Profile updated");
   } catch (err) {
-    console.error("Avatar save failed:", err);
-    showToast(`Could not save picture (${err.code || err.message})`, "error");
+    console.error("Profile save failed:", err);
+    showToast(`Could not save profile (${err.code || err.message})`, "error");
   }
+}
+
+function openProfileView(uid, fallbackName) {
+  const p = userCache[uid] || {};
+  const name = p.username || fallbackName || "user";
+  const badges = isOwnerName(name) ? '<span class="message-admin-badge">OWNER</span>'
+    : adminUids.has(uid) ? '<span class="message-admin-badge">ADMIN</span>' : "";
+  $("modal-title").textContent = name;
+  $("modal-body").innerHTML = `
+    <div class="profile-preview"><span class="avatar avatar-lg">${avatarInner(name, p.photoURL)}</span></div>
+    <p style="text-align:center;font-weight:700">${escapeHtml(name)} ${badges}</p>
+    <p class="bio-text">${p.bio ? escapeHtml(p.bio) : '<span class="bio-empty">No bio yet.</span>'}</p>
+  `;
+  const confirmBtn = $("modal-confirm");
+  confirmBtn.style.display = "none";
+  const cancelBtn = $("modal-cancel");
+  cancelBtn.textContent = "Close";
+  cancelBtn.onclick = () => $("modal-overlay").classList.add("hidden");
+  $("modal-overlay").classList.remove("hidden");
 }
 
 async function changeUsername() {
@@ -1971,6 +2002,21 @@ function initNavigation() {
   $("back-btn").addEventListener("click", leaveRoom);
 
   $("profile-btn").addEventListener("click", openProfileModal);
+
+  // Click any avatar/username to view that user's profile
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#mention-menu")) return;
+    const av = e.target.closest(".avatar[data-uid]");
+    if (av && av.dataset.uid) {
+      openProfileView(av.dataset.uid, av.dataset.name);
+      return;
+    }
+    const nm = e.target.closest(".message-username");
+    if (nm) {
+      const avEl = nm.closest(".message-header")?.querySelector(".avatar[data-uid]");
+      if (avEl && avEl.dataset.uid) openProfileView(avEl.dataset.uid, nm.textContent);
+    }
+  });
 
   $("close-room-btn").addEventListener("click", () => {
     if (!currentRoomId) return;
