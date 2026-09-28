@@ -1834,7 +1834,7 @@ async function loadAdminData() {
     const info = document.createElement("div");
     info.className = "admin-item-info";
     const badges = `${userIsOwner ? '<span class="message-admin-badge">OWNER</span>' : userIsAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""} ${userIsBanned ? '<span class="message-admin-badge">BANNED</span>' : ""}`;
-    info.innerHTML = `<h5>${escapeHtml(data.username)} ${badges}</h5><p>UID: ${escapeHtml(id.slice(0, 12))}...</p>`;
+    info.innerHTML = `<h5>${escapeHtml(data.username)} ${badges}</h5><p>UID: ${escapeHtml(id.slice(0, 12))}... · 🪙 ${data.coins || 0}</p>`;
     const av = document.createElement("span");
     av.className = "avatar";
     av.dataset.uid = id;
@@ -1857,6 +1857,7 @@ async function loadAdminData() {
     if (isOwner && !userIsOwner && !isSelf) {
       if (!userIsBanned) addBtn("Ban", "btn-danger", () => window.__banUser(id, data.username));
       else addBtn("Unban", "btn-ghost", () => window.__unbanUser(id));
+      addBtn("Give Coins", "btn-ghost", () => window.__giveCoins(id, data.username));
       if (ADMIN_UIDS.includes(id)) {
         const note = document.createElement("span");
         note.className = "admin-note";
@@ -1947,6 +1948,29 @@ window.__unbanUser = async (uid) => {
   await remove(ref(db, `banned/${uid}`));
   showToast("User unbanned");
   loadAdminData();
+};
+
+window.__giveCoins = async (uid, username) => {
+  if (!isOwner) {
+    showToast("Only the owner can give coins", "error");
+    return;
+  }
+  const raw = prompt(`How many coins to give ${username}?`, "100");
+  if (raw === null) return;
+  const amount = Math.floor(Number(raw));
+  if (!Number.isFinite(amount) || amount < 1 || amount > 100000) {
+    showToast("Enter a whole number between 1 and 100000", "error");
+    return;
+  }
+  try {
+    await runTransaction(ref(db, `users/${uid}/coins`), (c) => (c || 0) + amount);
+    if (userCache[uid]) userCache[uid].coins = (userCache[uid].coins || 0) + amount;
+    showToast(`Gave 🪙${amount} to ${username}`);
+    loadAdminData();
+  } catch (err) {
+    console.error("Give coins failed:", err);
+    showToast(`Couldn't give coins (${err.code || err.message})`, "error");
+  }
 };
 
 window.__deleteMessage = async (roomId, msgId) => {
