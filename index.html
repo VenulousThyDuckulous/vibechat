@@ -74,9 +74,22 @@
 
       <div class="lobby-body">
         <div class="lobby-left">
-          <h2>Rooms</h2>
+          <div class="lobby-tabs">
+            <button id="tab-rooms" class="lobby-tab active">Rooms</button>
+            <button id="tab-friends" class="lobby-tab">Friends <span id="friends-badge" class="tab-badge hidden"></span></button>
+          </div>
           <div id="room-list" class="room-list">
             <p class="empty-state">No rooms yet — create one!</p>
+          </div>
+          <div id="friends-panel" class="hidden">
+            <div class="friends-section">
+              <h3>Requests</h3>
+              <div id="friend-requests"></div>
+            </div>
+            <div class="friends-section">
+              <h3>Friends</h3>
+              <div id="friend-list"></div>
+            </div>
           </div>
         </div>
 
@@ -176,6 +189,7 @@
           <button id="back-btn" class="btn btn-ghost">← Lobby</button>
           <h3 id="chat-room-name"></h3>
           <button id="close-room-btn" class="btn btn-danger btn-small hidden" style="margin-top:8px">Close Room</button>
+          <button id="leave-room-btn" class="btn btn-ghost btn-small" style="margin-top:8px">Leave Room</button>
         </div>
         <div class="sidebar-section">
           <h4>Online — <span id="online-count">0</span></h4>

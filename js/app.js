@@ -25,6 +25,7 @@ import {
   onDisconnect,
   remove,
   update,
+  runTransaction,
   serverTimestamp,
   query,
   orderByChild,
@@ -46,6 +47,36 @@ let mentionCounts = {};
 let currentPresence = {};
 let mentionMenuState = { open: false, items: [], highlight: 0 };
 let replyTarget = null;
+let myRooms = new Set();
+let friendListeners = [];
+let friendsCache = {};
+let requestsCache = {};
+let friendsPrimed = false;
+
+function loadMyRooms() {
+  try {
+    myRooms = new Set(JSON.parse(localStorage.getItem("vibechat-myrooms") || "[]"));
+  } catch (e) {
+    myRooms = new Set();
+  }
+}
+
+function saveMyRooms() {
+  localStorage.setItem("vibechat-myrooms", JSON.stringify([...myRooms]));
+}
+
+// Saved room passwords (plaintext convenience — room locks are casual, not secure)
+function savedRoomPw(roomId) {
+  return localStorage.getItem(`vibechat-roompw:${roomId}`);
+}
+
+function saveRoomPw(roomId, pw) {
+  localStorage.setItem(`vibechat-roompw:${roomId}`, pw);
+}
+
+function clearRoomPw(roomId) {
+  localStorage.removeItem(`vibechat-roompw:${roomId}`);
+}
 
 const ANNOUNCEMENTS_ID = "announcements";
 
@@ -456,6 +487,7 @@ function initAuth() {
     } else {
       detachActiveListeners();
       stopNotifListeners();
+      stopFriends();
       closeAnnListeners();
       if (presenceRef && currentUser) {
         try { remove(presenceRef); } catch (e) {}
@@ -677,7 +709,9 @@ async function loadUserProfile() {
 
   await migrateAnnouncements();
   showScreen("lobby");
+  loadMyRooms();
   loadRooms();
+  loadFriends();
   updateAnnouncementsBadge();
   startNotifListeners();
   if (notifEnabled()) registerPushToken();
@@ -711,6 +745,18 @@ function loadRooms() {
   roomListeners.push({ ref: roomsRef, event: "child_added", cb: addedCb });
   roomListeners.push({ ref: roomsRef, event: "child_removed", cb: removedCb });
 
+  // Keep member counts / info fresh without a full reload
+  const changedCb = (snap) => {
+    const card = document.querySelector(`#room-list [data-room-id="${snap.key}"]`);
+    if (card) {
+      const p = card.querySelector(".room-card-info p");
+      if (p) p.innerHTML = roomCardSub(snap.val(), snap.key);
+    }
+    roomCache[snap.key] = snap.val();
+  };
+  onChildChanged(roomsRef, changedCb);
+  roomListeners.push({ ref: roomsRef, event: "child_changed", cb: changedCb });
+
   // Unread mention counts for the lobby badges
   const mentionsRef = ref(db, `mentions/${currentUser.uid}`);
   const mentionsCb = (snap) => {
@@ -735,6 +781,20 @@ function updateMentionBadges() {
   });
 }
 
+function roomCardSub(data, roomId) {
+  const base = `${data.isPrivate ? "🔒 Private" : "🌍 Public"} · ${data.memberCount || 0} members`;
+  return myRooms.has(roomId) ? `${base} · ✅ <b>You're in it</b>` : base;
+}
+
+function refreshRoomCard(roomId) {
+  const card = document.querySelector(`#room-list [data-room-id="${roomId}"]`);
+  const data = roomCache[roomId];
+  if (card && data) {
+    const p = card.querySelector(".room-card-info p");
+    if (p) p.innerHTML = roomCardSub(data, roomId);
+  }
+}
+
 function addRoomToList(roomId, data) {
   const list = $("room-list");
   const empty = list.querySelector(".empty-state");
@@ -747,7 +807,7 @@ function addRoomToList(roomId, data) {
   card.innerHTML = `
     <div class="room-card-info">
       <h4>${escapeHtml(data.name)}</h4>
-      <p>${data.isPrivate ? "🔒 Private" : "🌍 Public"} · ${data.memberCount || 0} members</p>
+      <p>${roomCardSub(data, roomId)}</p>
     </div>
     <div class="room-badges">
       <span class="mention-badge hidden"></span>
@@ -764,6 +824,7 @@ function removeRoomFromList(roomId) {
   const card = document.querySelector(`[data-room-id="${roomId}"]`);
   if (card) card.remove();
   delete roomCache[roomId];
+  if (myRooms.delete(roomId)) saveMyRooms();
   const list = $("room-list");
   if (list && !list.children.length) {
     list.innerHTML = '<p class="empty-state">No rooms yet — create one!</p>';
@@ -771,11 +832,80 @@ function removeRoomFromList(roomId) {
 }
 
 function handleJoinRoom(roomId, data) {
-  if (data.isPrivate) {
+  if (!data.isPrivate) {
+    enterRoom(roomId, data);
+    return;
+  }
+  // Private room: members with a saved password skip the prompt
+  const saved = savedRoomPw(roomId);
+  if (saved) verifyRoomPassword(roomId, data, saved, true);
+  else showPasswordModal(roomId, data);
+}
+
+async function verifyRoomPassword(roomId, data, pw, fromSaved) {
+  const hashed = await simpleHash(pw);
+  if (hashed === data.passwordHash) {
+    saveRoomPw(roomId, pw);
+    enterRoom(roomId, data);
+  } else if (fromSaved) {
+    clearRoomPw(roomId);
     showPasswordModal(roomId, data);
   } else {
-    joinRoom(roomId, data).catch(err => console.error("Join failed:", err));
+    showToast("Wrong room password", "error");
   }
+}
+
+async function enterRoom(roomId, data) {
+  await ensureMember(roomId);
+  myRooms.add(roomId);
+  saveMyRooms();
+  refreshRoomCard(roomId);
+  joinRoom(roomId, data).catch(err => console.error("Join failed:", err));
+}
+
+// Server membership is the source of truth (prevents double member counts).
+async function ensureMember(roomId) {
+  try {
+    const snap = await get(ref(db, `rooms/${roomId}/members/${currentUser.uid}`));
+    if (!snap.exists()) {
+      await set(ref(db, `rooms/${roomId}/members/${currentUser.uid}`), {
+        username: getUsername(),
+        joinedAt: serverTimestamp()
+      });
+      await runTransaction(ref(db, `rooms/${roomId}/memberCount`), (c) => (c || 0) + 1);
+    }
+  } catch (err) {
+    console.error("Member join failed:", err);
+  }
+}
+
+async function removeMember(roomId) {
+  try {
+    await remove(ref(db, `rooms/${roomId}/members/${currentUser.uid}`));
+    await runTransaction(ref(db, `rooms/${roomId}/memberCount`), (c) => Math.max(0, (c || 1) - 1));
+  } catch (err) {
+    console.error("Member leave failed:", err);
+  }
+}
+
+function leaveRoomForGood() {
+  if (!currentRoomId) return;
+  const name = currentRoom?.name || "this room";
+  const locked = !!currentRoom?.isPrivate;
+  showConfirmModal(
+    `Leave "${name}"?`,
+    `<p style="color:var(--text-secondary)">You'll be removed from the member list.${locked ? " You'll need the password to rejoin." : ""}</p>`,
+    "Leave Room",
+    async () => {
+      const roomId = currentRoomId;
+      await removeMember(roomId);
+      myRooms.delete(roomId);
+      saveMyRooms();
+      clearRoomPw(roomId);
+      leaveRoom();
+      showToast("Left room");
+    }
+  );
 }
 
 function showPasswordModal(roomId, data) {
@@ -790,13 +920,8 @@ function showPasswordModal(roomId, data) {
   $("modal-confirm").onclick = async () => {
     const pw = $("room-password-input").value;
     // Simple hash comparison (in production, use a proper auth flow)
-    const hashed = await simpleHash(pw);
-    if (hashed === data.passwordHash) {
-      overlay.classList.add("hidden");
-      joinRoom(roomId, data).catch(err => console.error("Join failed:", err));
-    } else {
-      showToast("Wrong room password", "error");
-    }
+    overlay.classList.add("hidden");
+    verifyRoomPassword(roomId, data, pw, false);
   };
   $("modal-cancel").onclick = () => overlay.classList.add("hidden");
 }
@@ -1335,7 +1460,9 @@ function openProfileView(uid, fallbackName) {
     <div class="profile-preview"><span class="avatar avatar-lg">${avatarInner(name, p.photoURL)}</span></div>
     <p style="text-align:center;font-weight:700">${escapeHtml(name)} ${badges}</p>
     <p class="bio-text">${p.bio ? escapeHtml(p.bio) : '<span class="bio-empty">No bio yet.</span>'}</p>
+    <div id="profile-friend-action" style="display:flex;justify-content:center;margin-top:12px"></div>
   `;
+  renderFriendAction(uid, $("modal-body").querySelector("#profile-friend-action"));
   const confirmBtn = $("modal-confirm");
   confirmBtn.style.display = "none";
   const cancelBtn = $("modal-cancel");
@@ -1458,6 +1585,9 @@ function initCreateRoom() {
       username: getUsername(),
       joinedAt: serverTimestamp()
     });
+    myRooms.add(newRoomRef.key);
+    saveMyRooms();
+    refreshRoomCard(newRoomRef.key);
 
     $("room-name").value = "";
     $("room-password").value = "";
@@ -1722,6 +1852,9 @@ function openAnnouncements() {
 function closeAnnouncements() {
   closeAnnListeners();
   $("ann-messages").innerHTML = "";
+  // Everything here is now read — no stale dot on the way out
+  localStorage.setItem("vibechat-ann-seen", String(Date.now()));
+  $("ann-dot").classList.add("hidden");
   showScreen("lobby");
 }
 
@@ -1950,6 +2083,7 @@ async function startNotifListeners() {
     if (!msg || msg.uid === currentUser.uid) return;
     if (screens.announcements.classList.contains("active")) return;
     pushNotify("📢 New announcement", `${msg.username}: ${(msg.text || "").slice(0, 120)}`, () => openAnnouncements());
+    updateAnnouncementsBadge();
   };
   onChildAdded(annRef, annAdded);
   notifListeners.push({ ref: annRef, event: "child_added", cb: annAdded });
@@ -1997,6 +2131,198 @@ function initNotifications() {
   paintBell();
 }
 
+// ============ FRIENDS ============
+function switchLobbyTab(which) {
+  $("tab-rooms").classList.toggle("active", which === "rooms");
+  $("tab-friends").classList.toggle("active", which === "friends");
+  $("room-list").classList.toggle("hidden", which !== "rooms");
+  $("friends-panel").classList.toggle("hidden", which !== "friends");
+}
+
+function loadFriends() {
+  friendListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  friendListeners = [];
+  friendsPrimed = false;
+
+  const reqRef = ref(db, `friendRequests/${currentUser.uid}`);
+  const reqCb = (snap) => {
+    const prev = new Set(Object.keys(requestsCache));
+    requestsCache = snap.val() || {};
+    renderFriends();
+    // Notify for brand-new incoming requests (skip the initial prime)
+    if (friendsPrimed) {
+      for (const [fromUid, req] of Object.entries(requestsCache)) {
+        if (!prev.has(fromUid)) {
+          pushNotify("🤝 Friend request", `${req.username || "Someone"} wants to be friends`, () => {
+            showScreen("lobby");
+            switchLobbyTab("friends");
+          });
+        }
+      }
+    }
+    friendsPrimed = true;
+  };
+  onValue(reqRef, reqCb);
+  friendListeners.push({ ref: reqRef, event: "value", cb: reqCb });
+
+  const frRef = ref(db, `friends/${currentUser.uid}`);
+  const frCb = (snap) => {
+    friendsCache = snap.val() || {};
+    renderFriends();
+  };
+  onValue(frRef, frCb);
+  friendListeners.push({ ref: frRef, event: "value", cb: frCb });
+
+  $("tab-rooms").onclick = () => switchLobbyTab("rooms");
+  $("tab-friends").onclick = () => switchLobbyTab("friends");
+}
+
+function stopFriends() {
+  friendListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  friendListeners = [];
+  friendsCache = {};
+  requestsCache = {};
+  friendsPrimed = false;
+}
+
+function friendRow(uid, username, buttons) {
+  const item = document.createElement("div");
+  item.className = "admin-item";
+  const photo = (userCache[uid] || {}).photoURL;
+  const display = userCache[uid]?.username || username;
+  const av = document.createElement("span");
+  av.className = "avatar";
+  av.dataset.uid = uid;
+  av.dataset.name = display;
+  av.innerHTML = avatarInner(display, photo);
+  item.appendChild(av);
+  const info = document.createElement("div");
+  info.className = "admin-item-info";
+  info.innerHTML = `<h5>${escapeHtml(display)}</h5>`;
+  item.appendChild(info);
+  const actions = document.createElement("div");
+  actions.className = "admin-item-actions";
+  buttons.forEach(([label, cls, fn]) => {
+    const b = document.createElement("button");
+    b.className = `btn ${cls} btn-small`;
+    b.textContent = label;
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      fn();
+    });
+    actions.appendChild(b);
+  });
+  item.appendChild(actions);
+  return item;
+}
+
+function renderFriends() {
+  const reqBox = $("friend-requests");
+  const frBox = $("friend-list");
+  if (!reqBox || !frBox) return;
+  reqBox.innerHTML = "";
+  frBox.innerHTML = "";
+
+  const reqIds = Object.keys(requestsCache);
+  const badge = $("friends-badge");
+  badge.textContent = reqIds.length > 0 ? reqIds.length : "";
+  badge.classList.toggle("hidden", reqIds.length === 0);
+
+  if (!reqIds.length) {
+    reqBox.innerHTML = '<p class="empty-state" style="padding:16px">No requests right now.</p>';
+  } else {
+    reqIds.forEach(fromUid => {
+      const req = requestsCache[fromUid];
+      reqBox.appendChild(friendRow(fromUid, req.username, [
+        ["Accept", "btn-primary", () => acceptFriend(fromUid, req.username)],
+        ["Decline", "btn-ghost", () => declineFriend(fromUid)]
+      ]));
+    });
+  }
+
+  const frIds = Object.keys(friendsCache);
+  if (!frIds.length) {
+    frBox.innerHTML = '<p class="empty-state" style="padding:16px">No friends yet — click any avatar to add one.</p>';
+  } else {
+    frIds.forEach(fid => {
+      frBox.appendChild(friendRow(fid, friendsCache[fid].username, [
+        ["Remove", "btn-ghost", () => removeFriend(fid, friendsCache[fid].username)]
+      ]));
+    });
+  }
+}
+
+async function sendFriendRequest(uid, username) {
+  try {
+    await set(ref(db, `friendRequests/${uid}/${currentUser.uid}`), {
+      username: getUsername(),
+      at: serverTimestamp()
+    });
+    showToast(`Request sent to ${username}`);
+    openProfileView(uid, username);
+  } catch (err) {
+    console.error("Friend request failed:", err);
+    showToast(`Couldn't send request (${err.code || err.message})`, "error");
+  }
+}
+
+async function acceptFriend(uid, username) {
+  try {
+    const me = getUsername();
+    await set(ref(db, `friends/${currentUser.uid}/${uid}`), { username, at: serverTimestamp() });
+    await set(ref(db, `friends/${uid}/${currentUser.uid}`), { username: me, at: serverTimestamp() });
+    await remove(ref(db, `friendRequests/${currentUser.uid}/${uid}`));
+    showToast(`You and ${username} are friends now`);
+  } catch (err) {
+    console.error("Accept failed:", err);
+    showToast("Couldn't accept request", "error");
+  }
+}
+
+async function declineFriend(uid) {
+  await remove(ref(db, `friendRequests/${currentUser.uid}/${uid}`)).catch(() => {});
+}
+
+async function removeFriend(uid, username) {
+  if (!confirm(`Remove ${username} from friends?`)) return;
+  await remove(ref(db, `friends/${currentUser.uid}/${uid}`)).catch(() => {});
+  await remove(ref(db, `friends/${uid}/${currentUser.uid}`)).catch(() => {});
+  showToast("Friend removed");
+}
+
+// Friend action button inside the profile popup
+async function renderFriendAction(uid, container) {
+  container.innerHTML = "";
+  if (!currentUser || uid === currentUser.uid) return;
+  try {
+    const [frSnap, inSnap, outSnap] = await Promise.all([
+      get(ref(db, `friends/${currentUser.uid}/${uid}`)),
+      get(ref(db, `friendRequests/${currentUser.uid}/${uid}`)),
+      get(ref(db, `friendRequests/${uid}/${currentUser.uid}`))
+    ]);
+    const addBtn = (label, cls, fn, disabled) => {
+      const b = document.createElement("button");
+      b.className = `btn ${cls} btn-small`;
+      b.textContent = label;
+      if (disabled) b.disabled = true;
+      else b.addEventListener("click", fn);
+      container.appendChild(b);
+    };
+    const name = (userCache[uid] || {}).username || "them";
+    if (frSnap.exists()) {
+      addBtn("Remove Friend", "btn-ghost", () => removeFriend(uid, name).then(() => openProfileView(uid, name)));
+    } else if (inSnap.exists()) {
+      addBtn("Accept Request", "btn-primary", () => acceptFriend(uid, name).then(() => openProfileView(uid, name)));
+    } else if (outSnap.exists()) {
+      addBtn("Requested ✓", "btn-ghost", null, true);
+    } else {
+      addBtn("Add Friend", "btn-primary", () => sendFriendRequest(uid, name));
+    }
+  } catch (err) {
+    console.error("Friend status failed:", err);
+  }
+}
+
 // ============ NAVIGATION ============
 function initNavigation() {
   $("back-btn").addEventListener("click", leaveRoom);
@@ -2026,12 +2352,17 @@ function initNavigation() {
       "Delete Room",
       async () => {
         const roomId = currentRoomId;
+        myRooms.delete(roomId);
+        saveMyRooms();
+        clearRoomPw(roomId);
         leaveRoom();
         await remove(ref(db, `rooms/${roomId}`));
         showToast("Room closed");
       }
     );
   });
+
+  $("leave-room-btn").addEventListener("click", leaveRoomForGood);
 }
 
 // ============ INIT ============

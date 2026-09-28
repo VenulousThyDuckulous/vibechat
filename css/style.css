@@ -405,6 +405,77 @@ input::placeholder {
   color: var(--text-secondary);
 }
 
+/* ============ LOBBY TABS + FRIENDS ============ */
+.lobby-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.lobby-tab {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.lobby-tab.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.tab-badge {
+  display: inline-block;
+  background: var(--warning);
+  color: #000;
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 1px 7px;
+  border-radius: 12px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.tab-badge.hidden {
+  display: none;
+}
+
+#friends-panel.hidden {
+  display: none;
+}
+
+.friends-section {
+  margin-bottom: 20px;
+}
+
+.friends-section h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+#friend-requests,
+#friend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#friends-panel .admin-item .avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 0.85rem;
+}
+
 .room-list {
   flex: 1;
   overflow-y: auto;
