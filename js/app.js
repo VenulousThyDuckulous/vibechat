@@ -1854,18 +1854,23 @@ async function loadAdminData() {
     };
     // Owner-only powers: banning and managing admins. Admins can moderate content only.
     // Note: config-file admins (ADMIN_UIDS) can only be revoked by editing the code.
-    if (isOwner && !userIsOwner && !isSelf) {
-      if (!userIsBanned) addBtn("Ban", "btn-danger", () => window.__banUser(id, data.username));
-      else addBtn("Unban", "btn-ghost", () => window.__unbanUser(id));
-      addBtn("Give Coins", "btn-ghost", () => window.__giveCoins(id, data.username));
-      if (ADMIN_UIDS.includes(id)) {
-        const note = document.createElement("span");
-        note.className = "admin-note";
-        note.textContent = "Config admin";
-        actions.appendChild(note);
+    // Coins can be granted to anyone, including yourself.
+    if (isOwner && !userIsOwner) {
+      if (!isSelf) {
+        if (!userIsBanned) addBtn("Ban", "btn-danger", () => window.__banUser(id, data.username));
+        else addBtn("Unban", "btn-ghost", () => window.__unbanUser(id));
       }
-      else if (!userIsAdmin) addBtn("Make Admin", "btn-ghost", () => window.__toggleAdmin(id, true));
-      else addBtn("Remove Admin", "btn-ghost", () => window.__toggleAdmin(id, false));
+      addBtn("Give Coins", "btn-ghost", () => window.__giveCoins(id, data.username));
+      if (!isSelf) {
+        if (ADMIN_UIDS.includes(id)) {
+          const note = document.createElement("span");
+          note.className = "admin-note";
+          note.textContent = "Config admin";
+          actions.appendChild(note);
+        }
+        else if (!userIsAdmin) addBtn("Make Admin", "btn-ghost", () => window.__toggleAdmin(id, true));
+        else addBtn("Remove Admin", "btn-ghost", () => window.__toggleAdmin(id, false));
+      }
     }
     item.appendChild(actions);
     userList.appendChild(item);
