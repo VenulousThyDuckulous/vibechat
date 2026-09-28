@@ -186,6 +186,10 @@
       <main class="chat-main">
         <div id="messages" class="messages"></div>
         <div id="typing-indicator" class="typing-indicator hidden"></div>
+        <div id="reply-bar" class="reply-bar hidden">
+          <div class="reply-bar-text">Replying to <b id="reply-to-name"></b>: <span id="reply-to-text"></span></div>
+          <button type="button" id="reply-cancel" class="reply-cancel" title="Cancel reply">✕</button>
+        </div>
         <form id="message-form" class="message-form">
           <button type="button" id="mention-btn" class="mention-at-btn" title="Mention someone">@</button>
           <button type="button" id="gif-btn" class="mention-at-btn" title="Send a GIF">🎬</button>

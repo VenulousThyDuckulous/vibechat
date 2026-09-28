@@ -45,6 +45,7 @@ let userCache = {};
 let mentionCounts = {};
 let currentPresence = {};
 let mentionMenuState = { open: false, items: [], highlight: 0 };
+let replyTarget = null;
 
 const ANNOUNCEMENTS_ID = "announcements";
 
@@ -261,6 +262,8 @@ function messageMentionsMe(msg) {
   const text = msg?.text || "";
   // Owner-sent @everyone pings every viewer
   if (isOwnerName(msg?.username) && /(?:^|\s)@everyone(?![A-Za-z0-9_])/i.test(text)) return true;
+  // Replies directed at me ping me too
+  if (msg?.replyTo?.uid && currentUser && msg.replyTo.uid === currentUser.uid) return true;
   const myName = getUsername().toLowerCase();
   let found = false;
   text.replace(MENTION_RE, (m, name) => {
@@ -780,6 +783,7 @@ async function joinRoom(roomId, data) {
   detachActiveListeners();
   currentPresence = {};
   hideMentionMenu();
+  clearReply();
   document.querySelector(".gif-picker")?.classList.add("hidden");
   currentRoomId = roomId;
   currentRoom = data;
@@ -814,6 +818,7 @@ function leaveRoom() {
   detachActiveListeners();
   currentPresence = {};
   hideMentionMenu();
+  clearReply();
   document.querySelector(".gif-picker")?.classList.add("hidden");
   if (presenceRef) {
     remove(presenceRef);
@@ -917,12 +922,12 @@ function appendMessage(msgId, msg) {
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
-    <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
+    <div class="message-bubble">${msg.replyTo ? `<div class="reply-quote" data-goto="${escapeHtml(msg.replyTo.msgId)}"><span class="reply-author">@${escapeHtml(msg.replyTo.username)}</span><span>${escapeHtml((msg.replyTo.text || "").slice(0, 120))}</span></div>` : ""}${renderMessageText(msg.text, isOwnerName(msg.username))}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
   `;
   if (messageMentionsMe(msg)) div.classList.add("mentioned");
   container.appendChild(div);
+  const header = div.querySelector(".message-header");
   if (isAdmin) {
-    const header = div.querySelector(".message-header");
     const del = document.createElement("button");
     del.className = "msg-delete";
     del.title = "Delete message";
@@ -937,7 +942,44 @@ function appendMessage(msgId, msg) {
     });
     header.appendChild(del);
   }
+  const rpl = document.createElement("button");
+  rpl.className = "msg-reply";
+  rpl.title = "Reply";
+  rpl.textContent = "↩️";
+  rpl.addEventListener("click", () => {
+    replyTarget = { msgId, uid: msg.uid, username: msg.username, text: (msg.text || "").slice(0, 120) };
+    showReplyPreview();
+    $("message-input").focus();
+  });
+  header.appendChild(rpl);
   container.scrollTop = container.scrollHeight;
+}
+
+function showReplyPreview() {
+  if (!replyTarget) {
+    $("reply-bar").classList.add("hidden");
+    return;
+  }
+  $("reply-to-name").textContent = "@" + replyTarget.username;
+  $("reply-to-text").textContent = replyTarget.text || "";
+  $("reply-bar").classList.remove("hidden");
+}
+
+function clearReply() {
+  replyTarget = null;
+  const bar = $("reply-bar");
+  if (bar) bar.classList.add("hidden");
+}
+
+function scrollToMessage(msgId) {
+  const el = document.querySelector(`#messages .message[data-msg-id="${msgId}"]`);
+  if (!el) {
+    showToast("Original message isn't loaded", "error");
+    return;
+  }
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 1300);
 }
 
 function setupTyping(roomId) {
@@ -985,12 +1027,14 @@ function initChat() {
     if (!text || !currentRoomId) return;
 
     const messagesRef = ref(db, `rooms/${currentRoomId}/messages`);
-    const msgRef = await push(messagesRef, {
+    const msgData = {
       uid: currentUser.uid,
       username: getUsername(),
       text: text,
       timestamp: serverTimestamp()
-    });
+    };
+    if (replyTarget) msgData.replyTo = { ...replyTarget };
+    const msgRef = await push(messagesRef, msgData);
     // Notify mentioned users (unread badge on their lobby room card)
     try {
       for (const uid of extractMentionedUids(text, isOwner)) {
@@ -1000,12 +1044,21 @@ function initChat() {
           at: serverTimestamp()
         });
       }
+      // Replies ping the original author like a mention
+      if (replyTarget && replyTarget.uid !== currentUser.uid) {
+        await set(ref(db, `mentions/${replyTarget.uid}/${currentRoomId}/${msgRef.key}`), {
+          by: getUsername(),
+          text: `↩️ ${text.slice(0, 110)}`,
+          at: serverTimestamp()
+        });
+      }
     } catch (err) {
       console.error("Mention notify failed:", err);
     }
 
     input.value = "";
     if (typingRef) remove(typingRef);
+    clearReply();
     hideMentionMenu();
   });
 
@@ -1028,6 +1081,13 @@ function initChat() {
 
   // GIF picker (Giphy)
   $("gif-btn").addEventListener("click", toggleGifPicker);
+
+  // Reply composer
+  $("reply-cancel").addEventListener("click", clearReply);
+  $("messages").addEventListener("click", (e) => {
+    const quote = e.target.closest(".reply-quote");
+    if (quote && quote.dataset.goto) scrollToMessage(quote.dataset.goto);
+  });
 }
 
 // ============ GIF PICKER (GIPHY) ============

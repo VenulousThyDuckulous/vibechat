@@ -812,6 +812,109 @@ input::placeholder {
   color: var(--text-secondary);
 }
 
+/* ============ REPLIES ============ */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.reply-bar.hidden {
+  display: none;
+}
+
+.reply-bar-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reply-bar-text b {
+  color: var(--warning);
+}
+
+.reply-cancel {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.reply-cancel:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.reply-quote {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reply-quote:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.reply-author {
+  color: var(--accent);
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.msg-reply {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.message:hover .msg-reply {
+  display: inline-block;
+}
+
+.msg-reply:hover {
+  background: var(--bg-hover);
+}
+
+@media (hover: none) {
+  .msg-reply {
+    display: inline-block;
+    opacity: 0.7;
+  }
+}
+
+.message.flash .message-bubble {
+  animation: flashOutline 1.2s ease;
+}
+
+@keyframes flashOutline {
+  0%, 100% { outline: 2px solid transparent; }
+  25%, 75% { outline: 2px solid var(--warning); }
+}
+
 /* ============ GIF PICKER ============ */
 .gif-picker {
   position: absolute;

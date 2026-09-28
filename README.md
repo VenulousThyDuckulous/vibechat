@@ -19,6 +19,7 @@ A chill place to hang out and chat in real time.
 - ⌨️ Typing indicators
 - 🖼️ Profile pictures, username & password changes
 - 📣 @mentions + owner-only @everyone, with unread badges
+- ↩️ Message replies that ping the author
 - 🎬 GIFs (Giphy)
 - 🔔 Browser notifications for mentions & announcements
 - 📌 Announcements tab (owner posts, everyone reads)
