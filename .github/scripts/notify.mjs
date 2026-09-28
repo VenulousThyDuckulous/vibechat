@@ -28,6 +28,11 @@ async function rtdb(path, method = "GET", body) {
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
+  if (res.status === 404) return null; // path doesn't exist yet
+  if (res.status === 401 || res.status === 403) {
+    const t = await res.text();
+    throw new Error(`RTDB ${method} ${path}: ${res.status} ${t} — check the service account belongs to project ${PROJECT_ID}`);
+  }
   if (!res.ok) throw new Error(`RTDB ${method} ${path}: ${res.status} ${await res.text()}`);
   return res.json();
 }
