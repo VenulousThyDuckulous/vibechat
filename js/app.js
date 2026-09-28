@@ -51,6 +51,44 @@ let myRooms = new Set();
 let coinBalance = 0;
 let avatarDraft = null;
 let coinListenerRef = null;
+let plateDraftTheme = "classic";
+
+const PLATE_UNLOCK_PRICE = 1000;
+
+// Nameplate themes (pure CSS, see style.css). The plate itself must be
+// unlocked first (1000 coins), then themes are bought individually.
+const PLATE_THEMES = [
+  { id: "classic", name: "Classic", price: 0 },
+  { id: "ember", name: "Ember", price: 100 },
+  { id: "crimson", name: "Crimson", price: 150 },
+  { id: "ocean", name: "Ocean", price: 200 },
+  { id: "mint", name: "Mint", price: 300 },
+  { id: "sunset", name: "Sunset", price: 450 },
+  { id: "royal", name: "Royal", price: 600 },
+  { id: "diamond", name: "Diamond", price: 800 }
+];
+
+function plateHtml(uid) {
+  const p = (userCache[uid] || {}).nameplate;
+  const show = p?.text ? "" : ' style="display:none"';
+  const theme = p?.theme || "classic";
+  const text = p?.text ? escapeHtml(p.text.slice(0, 16)) : "";
+  return `<span class="plate plate-${theme}" data-plate-uid="${escapeHtml(uid)}"${show}>${text}</span>`;
+}
+
+function paintPlatesIn(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll("[data-plate-uid]").forEach(el => {
+    const p = (userCache[el.dataset.plateUid] || {}).nameplate;
+    if (p?.text) {
+      el.className = `plate plate-${p.theme || "classic"}`;
+      el.textContent = p.text.slice(0, 16);
+      el.style.display = "";
+    } else {
+      el.style.display = "none";
+    }
+  });
+}
 let friendListeners = [];
 let friendsCache = {};
 let requestsCache = {};
@@ -1118,7 +1156,7 @@ function appendMessage(msgId, msg) {
     <div class="message-header">
       <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
       <span class="message-username">${escapeHtml(msg.username)}</span>
-      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
+      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""} ${plateHtml(msg.uid)}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
     <div class="message-bubble">${msg.replyTo ? `<div class="reply-quote" data-goto="${escapeHtml(msg.replyTo.msgId)}"><span class="reply-author">@${escapeHtml(msg.replyTo.username)}</span><span>${escapeHtml((msg.replyTo.text || "").slice(0, 120))}</span></div>` : ""}${renderMessageText(msg.text, isOwnerName(msg.username))}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
@@ -1416,6 +1454,13 @@ function openProfileModal() {
       <div id="frames-grid" class="frames-grid"></div>
     </div>
     <div class="profile-section">
+      <h4>Nameplate</h4>
+      <div class="plate-preview"><span id="plate-live-preview" class="plate plate-classic">Preview</span></div>
+      <input type="text" id="plate-text" maxlength="16" placeholder="Plate text (max 16)" autocomplete="off" />
+      <div id="plates-grid" class="plates-grid"></div>
+      <button id="plate-action" class="btn btn-primary btn-small">Unlock — 🪙1000</button>
+    </div>
+    <div class="profile-section">
       <h4>Change username</h4>
       <input type="text" id="profile-username" maxlength="20" placeholder="New username" autocomplete="off" />
       <button id="profile-username-save" class="btn btn-primary btn-small">Change Username</button>
@@ -1438,6 +1483,7 @@ function openProfileModal() {
   $("profile-bio").value = (userCache[currentUser.uid] || {}).bio || "";
   syncFrameClass($("profile-preview-avatar"), currentUser.uid);
   renderFramesShop();
+  initPlatesShop();
 
   $("profile-file").addEventListener("change", async (e) => {
     const file = e.target.files[0];
@@ -1512,7 +1558,7 @@ function openProfileView(uid, fallbackName) {
   $("modal-title").textContent = name;
   $("modal-body").innerHTML = `
     <div class="profile-preview"><span id="profile-view-avatar" class="avatar avatar-lg">${avatarInner(name, p.photoURL)}</span></div>
-    <p style="text-align:center;font-weight:700">${escapeHtml(name)} ${badges}</p>
+    <p style="text-align:center;font-weight:700">${escapeHtml(name)} ${badges} ${plateHtml(uid)}</p>
     <p class="bio-text">${p.bio ? escapeHtml(p.bio) : '<span class="bio-empty">No bio yet.</span>'}</p>
     <div id="profile-friend-action" style="display:flex;justify-content:center;margin-top:12px"></div>
     <div id="profile-msg-action" style="display:flex;justify-content:center;margin-top:8px"></div>
@@ -1653,6 +1699,180 @@ function stopCoinListener() {
     coinListenerRef = null;
   }
   coinBalance = 0;
+}
+
+function initPlatesShop() {
+  const me = userCache[currentUser.uid] || {};
+  plateDraftTheme = (me.nameplate && me.nameplate.theme) || "classic";
+  const textInput = $("plate-text");
+  textInput.value = (me.nameplate && me.nameplate.text) || "";
+  const refreshPreview = () => {
+    const prev = $("plate-live-preview");
+    prev.className = `plate plate-${plateDraftTheme}`;
+    prev.textContent = textInput.value.trim().slice(0, 16) || "Preview";
+  };
+  textInput.oninput = refreshPreview;
+  refreshPreview();
+  renderPlatesShop();
+}
+
+function renderPlatesShop() {
+  const grid = $("plates-grid");
+  if (!grid || !currentUser) return;
+  const me = userCache[currentUser.uid] || {};
+  const unlocked = !!(me.nameplate && me.nameplate.text);
+  const owned = (me.plates && me.plates.owned) || {};
+  const equipped = (me.nameplate && me.nameplate.theme) || "classic";
+  grid.innerHTML = "";
+  PLATE_THEMES.forEach(t => {
+    const isEquipped = unlocked && equipped === t.id;
+    const isOwned = t.id === "classic" || !!owned[t.id];
+    const item = document.createElement("div");
+    item.className = "plate-item";
+    item.innerHTML = `
+      <span class="plate plate-${t.id} plate-sample">Aa</span>
+      <span class="plate-meta">
+        <span class="plate-name">${t.name}</span>
+      </span>
+    `;
+    const btn = document.createElement("button");
+    if (isEquipped) {
+      btn.className = "btn btn-ghost btn-small";
+      btn.textContent = "Equipped ✓";
+      btn.disabled = true;
+    } else if (isOwned && unlocked) {
+      btn.className = "btn btn-primary btn-small";
+      btn.textContent = "Equip";
+      btn.addEventListener("click", () => equipPlateTheme(t.id, t.name));
+    } else if (isOwned) {
+      btn.className = "btn btn-primary btn-small";
+      btn.textContent = "Select";
+      btn.addEventListener("click", () => {
+        plateDraftTheme = t.id;
+        const prev = $("plate-live-preview");
+        if (prev) {
+          prev.className = `plate plate-${t.id}`;
+          renderPlatesShop();
+        }
+      });
+    } else {
+      btn.className = "btn btn-ghost btn-small";
+      btn.textContent = `Buy 🪙${t.price}`;
+      btn.addEventListener("click", () => buyPlateTheme(t.id, t.name, t.price));
+    }
+    item.querySelector(".plate-meta").appendChild(btn);
+    grid.appendChild(item);
+  });
+  const action = $("plate-action");
+  if (unlocked) {
+    action.textContent = "Save Text";
+    action.onclick = savePlateText;
+  } else {
+    action.textContent = `Unlock — 🪙${PLATE_UNLOCK_PRICE}`;
+    action.onclick = unlockNameplate;
+  }
+}
+
+async function unlockNameplate() {
+  const text = ($("plate-text")?.value || "").trim().slice(0, 16);
+  if (!text) {
+    showToast("Write your plate text first", "error");
+    return;
+  }
+  try {
+    const res = await runTransaction(ref(db, `users/${currentUser.uid}/coins`), (c) => {
+      if ((c || 0) < PLATE_UNLOCK_PRICE) return; // abort
+      return c - PLATE_UNLOCK_PRICE;
+    });
+    if (!res.committed) {
+      showToast(`Need 🪙${PLATE_UNLOCK_PRICE} to unlock — play games to earn more!`, "error");
+      return;
+    }
+    await update(ref(db, `users/${currentUser.uid}`), {
+      "nameplate/text": text,
+      "nameplate/theme": "classic"
+    });
+    const me = userCache[currentUser.uid] || (userCache[currentUser.uid] = {});
+    me.coins = res.snapshot.val() || 0;
+    me.nameplate = { text, theme: "classic" };
+    coinBalance = me.coins;
+    plateDraftTheme = "classic";
+    paintPlatesIn(document);
+    renderPlatesShop();
+    showToast("Nameplate unlocked!");
+  } catch (err) {
+    console.error("Nameplate unlock failed:", err);
+    showToast(`Couldn't unlock (${err.code || err.message})`, "error");
+  }
+}
+
+async function savePlateText() {
+  const text = ($("plate-text")?.value || "").trim().slice(0, 16);
+  if (!text) {
+    showToast("Plate text can't be empty", "error");
+    return;
+  }
+  try {
+    await update(ref(db, `users/${currentUser.uid}`), { "nameplate/text": text });
+    const me = userCache[currentUser.uid] || (userCache[currentUser.uid] = {});
+    me.nameplate = me.nameplate || {};
+    me.nameplate.text = text;
+    paintPlatesIn(document);
+    showToast("Plate text saved!");
+  } catch (err) {
+    console.error("Plate text save failed:", err);
+    showToast("Couldn't save text", "error");
+  }
+}
+
+async function buyPlateTheme(id, name, price) {
+  const me = userCache[currentUser.uid] || {};
+  if (!me.nameplate?.text) {
+    showToast("Unlock your nameplate first (🪙1000)", "error");
+    return;
+  }
+  try {
+    const res = await runTransaction(ref(db, `users/${currentUser.uid}/coins`), (c) => {
+      if ((c || 0) < price) return; // abort
+      return c - price;
+    });
+    if (!res.committed) {
+      showToast(`Need 🪙${price} for ${name} — play games to earn more!`, "error");
+      return;
+    }
+    await update(ref(db, `users/${currentUser.uid}`), {
+      [`plates/owned/${id}`]: true,
+      "nameplate/theme": id
+    });
+    me.coins = res.snapshot.val() || 0;
+    me.plates = me.plates || {};
+    me.plates.owned = { ...(me.plates.owned || {}), [id]: true };
+    me.nameplate.theme = id;
+    plateDraftTheme = id;
+    coinBalance = me.coins;
+    paintPlatesIn(document);
+    renderPlatesShop();
+    showToast(`${name} plate equipped!`);
+  } catch (err) {
+    console.error("Plate buy failed:", err);
+    showToast(`Couldn't buy theme (${err.code || err.message})`, "error");
+  }
+}
+
+async function equipPlateTheme(id, name) {
+  try {
+    await update(ref(db, `users/${currentUser.uid}`), { "nameplate/theme": id });
+    const me = userCache[currentUser.uid] || (userCache[currentUser.uid] = {});
+    me.nameplate = me.nameplate || {};
+    me.nameplate.theme = id;
+    plateDraftTheme = id;
+    paintPlatesIn(document);
+    renderPlatesShop();
+    showToast(`${name} plate equipped!`);
+  } catch (err) {
+    console.error("Plate equip failed:", err);
+    showToast("Couldn't equip theme", "error");
+  }
 }
 
 async function changeUsername() {
@@ -1834,7 +2054,7 @@ async function loadAdminData() {
     const info = document.createElement("div");
     info.className = "admin-item-info";
     const badges = `${userIsOwner ? '<span class="message-admin-badge">OWNER</span>' : userIsAdmin ? '<span class="message-admin-badge">ADMIN</span>' : ""} ${userIsBanned ? '<span class="message-admin-badge">BANNED</span>' : ""}`;
-    info.innerHTML = `<h5>${escapeHtml(data.username)} ${badges}</h5><p>UID: ${escapeHtml(id.slice(0, 12))}... · 🪙 ${data.coins || 0}</p>`;
+    info.innerHTML = `<h5>${escapeHtml(data.username)} ${badges} ${plateHtml(id)}</h5><p>UID: ${escapeHtml(id.slice(0, 12))}... · 🪙 ${data.coins || 0}</p>`;
     const av = document.createElement("span");
     av.className = "avatar";
     av.dataset.uid = id;
@@ -2082,7 +2302,7 @@ function appendAnnouncement(msgId, msg) {
     <div class="message-header">
       <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
       <span class="message-username">${escapeHtml(msg.username)}</span>
-      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
+      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""} ${plateHtml(msg.uid)}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
     <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}</div>
@@ -2671,7 +2891,7 @@ function appendDmMessage(msgId, msg) {
     <div class="message-header">
       <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
       <span class="message-username">${escapeHtml(msg.username)}</span>
-      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
+      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""} ${plateHtml(msg.uid)}
       <span class="message-time">${formatTime(msg.timestamp)}</span>
     </div>
     <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}</div>

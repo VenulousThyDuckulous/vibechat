@@ -19,6 +19,7 @@ A chill place to hang out and chat in real time.
 - ⌨️ Typing indicators
 - 🖼️ Profile pictures, username & password changes
 - 🪙 Game coins + avatar frames shop
+- 🏷️ Custom nameplates (1000 unlock, 100–800 themes)
 - 📝 Profile bios (click any avatar to view)
 - 🤝 Friends with requests
 - 💬 Direct messages with unread badges

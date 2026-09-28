@@ -1353,6 +1353,80 @@ input::placeholder {
   padding: 5px 8px;
 }
 
+/* ============ NAMEPLATES (shop, pure CSS) ============ */
+.plate {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.plate-classic { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); border: 1px solid var(--border); }
+.plate-ember { background: rgba(240, 120, 48, 0.2); color: #ff9a55; border: 1px solid #f07830; }
+.plate-crimson { background: rgba(224, 85, 85, 0.2); color: #ff8080; border: 1px solid #e05555; }
+.plate-ocean { background: rgba(58, 168, 224, 0.2); color: #5cc4f5; border: 1px solid #3aa8e0; }
+.plate-mint { background: rgba(62, 207, 142, 0.2); color: #5fe3a6; border: 1px solid #3ecf8e; }
+.plate-sunset { background: linear-gradient(90deg, #ff6b35, #f0c060); color: #2a1500; border: 1px solid #ff6b35; }
+.plate-royal { background: rgba(179, 102, 255, 0.2); color: #c68aff; border: 1px solid #b366ff; box-shadow: 0 0 8px rgba(179, 102, 255, 0.5); }
+.plate-diamond { background: linear-gradient(135deg, #d8f4ff, #ffffff); color: #0a3d5c; border: 1px solid #9adcff; box-shadow: 0 0 10px rgba(180, 230, 255, 0.7); }
+
+.plates-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.plate-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: 0.8rem;
+}
+
+.plate-item .plate-sample {
+  flex-shrink: 0;
+}
+
+.plate-item .plate-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plate-item .plate-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plate-item .btn-small {
+  font-size: 0.75rem;
+  padding: 5px 8px;
+  align-self: flex-start;
+}
+
+.plate-preview {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+  min-height: 28px;
+}
+
+.plate-preview .plate {
+  font-size: 0.85rem;
+  padding: 4px 14px;
+}
+
 .bio-text {
   margin-top: 12px;
   line-height: 1.5;
