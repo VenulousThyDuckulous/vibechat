@@ -230,13 +230,24 @@ function escapeHtml(str) {
 }
 
 const URL_RE = /(https?:\/\/[^\s<]+)/g;
-const MENTION_RE = /@([A-Za-z0-9_][A-Za-z0-9_ |.\-]{2,19})/g;
+const MENTION_CAND_RE = /@([A-Za-z0-9_ |.\-]{1,20})/g;
 
-function findUserByName(name) {
-  const want = (name || "").trim().toLowerCase().replace(/[ .|\-]+$/, "");
-  if (!want) return null;
-  for (const [uid, u] of Object.entries(userCache)) {
-    if ((u.username || "").toLowerCase() === want) return { uid, username: u.username };
+// Greedy candidate + shrink until a real username matches, so
+// "@bob hello there" pings bob instead of looking up "bob hello there".
+// Returns { uid, username, matchLen } where matchLen is raw chars consumed.
+function lookupMention(cand) {
+  let c = (cand || "").trim();
+  while (c) {
+    const norm = c.toLowerCase().replace(/[ .|\-]+$/, "");
+    if (norm) {
+      for (const [uid, u] of Object.entries(userCache)) {
+        if ((u.username || "").toLowerCase() === norm) {
+          return { uid, username: u.username, matchLen: norm.length };
+        }
+      }
+    }
+    const sp = c.lastIndexOf(" ");
+    c = (sp > 0 ? c.slice(0, sp) : c.slice(0, -1)).trimEnd();
   }
   return null;
 }
@@ -250,8 +261,8 @@ function extractMentionedUids(text, senderIsOwner) {
       if (uid !== currentUser.uid) uids.add(uid);
     }
   }
-  raw.replace(MENTION_RE, (m, name) => {
-    const hit = findUserByName(name);
+  raw.replace(MENTION_CAND_RE, (m, cand) => {
+    const hit = lookupMention(cand);
     if (hit && currentUser && hit.uid !== currentUser.uid) uids.add(hit.uid);
     return m;
   });
@@ -266,8 +277,8 @@ function messageMentionsMe(msg) {
   if (msg?.replyTo?.uid && currentUser && msg.replyTo.uid === currentUser.uid) return true;
   const myName = getUsername().toLowerCase();
   let found = false;
-  text.replace(MENTION_RE, (m, name) => {
-    const hit = findUserByName(name);
+  text.replace(MENTION_CAND_RE, (m, cand) => {
+    const hit = lookupMention(cand);
     if (hit && hit.username.toLowerCase() === myName) found = true;
     return m;
   });
@@ -275,26 +286,39 @@ function messageMentionsMe(msg) {
 }
 
 function renderMessageText(raw, everyoneActive = false) {
-  const esc = escapeHtml(raw || "");
+  const text = raw || "";
+  // Pull URLs out first (raw), so @ inside links never parses as mentions.
+  // Private-use placeholders survive the escape step unharmed.
   const urls = [];
-  const noUrls = esc.replace(URL_RE, (m) => {
+  const noUrls = text.replace(URL_RE, (m) => {
     urls.push(m);
-    return `\u0000${urls.length - 1}\u0000`;
+    return `\uE000${urls.length - 1}\uE001`;
   });
   const myName = getUsername().toLowerCase();
-  const withMentions = noUrls.replace(MENTION_RE, (m, name) => {
-    const trimmed = name.trim().replace(/[ .|\-]+$/, "");
-    if (everyoneActive && trimmed.toLowerCase() === "everyone") {
-      return `<span class="mention me">@everyone</span>`;
+  let out = "";
+  let last = 0;
+  const candRe = new RegExp(MENTION_CAND_RE.source, "g");
+  let m;
+  while ((m = candRe.exec(noUrls)) !== null) {
+    const cand = m[1];
+    const ev = /^everyone(?![A-Za-z0-9_])/i.exec(cand);
+    if (everyoneActive && ev) {
+      out += escapeHtml(noUrls.slice(last, m.index)) + `<span class="mention me">@everyone</span>`;
+      last = m.index + 1 + ev[0].length;
+      continue;
     }
-    const hit = findUserByName(name);
-    if (!hit) return m;
+    const hit = lookupMention(cand);
+    if (!hit) continue;
     const me = hit.username.toLowerCase() === myName;
-    return `<span class="mention${me ? " me" : ""}">@${escapeHtml(hit.username)}</span>`;
-  });
-  return withMentions.replace(/\u0000(\d+)\u0000/g, (_, i) => {
-    const u = urls[+i];
-    return `<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
+    out += escapeHtml(noUrls.slice(last, m.index)) +
+      `<span class="mention${me ? " me" : ""}">@${escapeHtml(hit.username)}</span>`;
+    last = m.index + 1 + hit.matchLen;
+  }
+  out += escapeHtml(noUrls.slice(last));
+  return out.replace(/\uE000(\d+)\uE001/g, (_, i) => {
+    const u = urls[+i] || "";
+    const e = escapeHtml(u);
+    return `<a href="${e}" target="_blank" rel="noopener">${e}</a>`;
   });
 }
 
@@ -328,16 +352,25 @@ function updateMentionMenu() {
     hideMentionMenu();
     return;
   }
-  const query = q.query.toLowerCase();
-  const onlineItems = Object.entries(currentPresence)
-    .filter(([uid, u]) => uid !== currentUser.uid && (u.username || "").toLowerCase().includes(query))
-    .map(([uid, u]) => ({ uid, username: u.username, online: true }));
-  const seen = new Set(onlineItems.map(i => i.uid));
-  seen.add(currentUser.uid);
-  const otherItems = Object.entries(userCache)
-    .filter(([uid, u]) => !seen.has(uid) && (u.username || "").toLowerCase().includes(query))
-    .map(([uid, u]) => ({ uid, username: u.username, online: false }));
-  let items = [...onlineItems, ...otherItems];
+  const buildItems = (qq) => {
+    const online = Object.entries(currentPresence)
+      .filter(([uid, u]) => uid !== currentUser.uid && (u.username || "").toLowerCase().includes(qq))
+      .map(([uid, u]) => ({ uid, username: u.username, online: true }));
+    const seen = new Set(online.map(i => i.uid));
+    seen.add(currentUser.uid);
+    const others = Object.entries(userCache)
+      .filter(([uid, u]) => !seen.has(uid) && (u.username || "").toLowerCase().includes(qq))
+      .map(([uid, u]) => ({ uid, username: u.username, online: false }));
+    return [...online, ...others];
+  };
+  // If trailing message text kills all matches, drop words from the right.
+  let query = q.query.toLowerCase();
+  let all = buildItems(query);
+  while (!all.length && /\s/.test(query.trim())) {
+    query = query.trim().slice(0, query.trim().lastIndexOf(" "));
+    all = buildItems(query);
+  }
+  let items = all;
   if (isOwner && "everyone".includes(query)) {
     items.unshift({ uid: null, username: "everyone", online: true, everyone: true });
   }
