@@ -447,7 +447,8 @@ input::placeholder {
   display: none;
 }
 
-#friends-panel.hidden {
+#friends-panel.hidden,
+#dms-panel.hidden {
   display: none;
 }
 
@@ -464,7 +465,8 @@ input::placeholder {
 }
 
 #friend-requests,
-#friend-list {
+#friend-list,
+#dm-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -474,6 +476,38 @@ input::placeholder {
   width: 30px;
   height: 30px;
   font-size: 0.85rem;
+}
+
+#dms-panel .admin-item {
+  cursor: pointer;
+}
+
+#dms-panel .admin-item:hover {
+  border-color: var(--accent);
+}
+
+.dm-peer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dm-peer .avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 0.85rem;
+}
+
+.dm-peer h3 {
+  margin: 0;
+}
+
+.dm-snippet {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .room-list {

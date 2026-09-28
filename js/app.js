@@ -121,7 +121,8 @@ const screens = {
   chat: $("chat-screen"),
   admin: $("admin-screen"),
   games: $("games-screen"),
-  announcements: $("announcements-screen")
+  announcements: $("announcements-screen"),
+  dm: $("dm-screen")
 };
 
 // ============ UTILITIES ============
@@ -488,6 +489,7 @@ function initAuth() {
       detachActiveListeners();
       stopNotifListeners();
       stopFriends();
+      detachDmAll();
       closeAnnListeners();
       if (presenceRef && currentUser) {
         try { remove(presenceRef); } catch (e) {}
@@ -712,6 +714,7 @@ async function loadUserProfile() {
   loadMyRooms();
   loadRooms();
   loadFriends();
+  loadDmList();
   updateAnnouncementsBadge();
   startNotifListeners();
   if (notifEnabled()) registerPushToken();
@@ -1461,8 +1464,21 @@ function openProfileView(uid, fallbackName) {
     <p style="text-align:center;font-weight:700">${escapeHtml(name)} ${badges}</p>
     <p class="bio-text">${p.bio ? escapeHtml(p.bio) : '<span class="bio-empty">No bio yet.</span>'}</p>
     <div id="profile-friend-action" style="display:flex;justify-content:center;margin-top:12px"></div>
+    <div id="profile-msg-action" style="display:flex;justify-content:center;margin-top:8px"></div>
   `;
   renderFriendAction(uid, $("modal-body").querySelector("#profile-friend-action"));
+  const msgBox = $("modal-body").querySelector("#profile-msg-action");
+  msgBox.innerHTML = "";
+  if (currentUser && uid !== currentUser.uid) {
+    const b = document.createElement("button");
+    b.className = "btn btn-primary btn-small";
+    b.textContent = "Message";
+    b.addEventListener("click", () => {
+      $("modal-overlay").classList.add("hidden");
+      openDM(uid, name);
+    });
+    msgBox.appendChild(b);
+  }
   const confirmBtn = $("modal-confirm");
   confirmBtn.style.display = "none";
   const cancelBtn = $("modal-cancel");
@@ -2135,8 +2151,10 @@ function initNotifications() {
 function switchLobbyTab(which) {
   $("tab-rooms").classList.toggle("active", which === "rooms");
   $("tab-friends").classList.toggle("active", which === "friends");
+  $("tab-dms").classList.toggle("active", which === "dms");
   $("room-list").classList.toggle("hidden", which !== "rooms");
   $("friends-panel").classList.toggle("hidden", which !== "friends");
+  $("dms-panel").classList.toggle("hidden", which !== "dms");
 }
 
 function loadFriends() {
@@ -2172,9 +2190,6 @@ function loadFriends() {
   };
   onValue(frRef, frCb);
   friendListeners.push({ ref: frRef, event: "value", cb: frCb });
-
-  $("tab-rooms").onclick = () => switchLobbyTab("rooms");
-  $("tab-friends").onclick = () => switchLobbyTab("friends");
 }
 
 function stopFriends() {
@@ -2323,6 +2338,247 @@ async function renderFriendAction(uid, container) {
   }
 }
 
+// ============ DIRECT MESSAGES ============
+let dmListListeners = [];
+let dmViewListeners = [];
+let dmIndex = {};
+let dmUnreadCounts = {};
+let dmSeen = {};
+let dmPrimed = false;
+let openDmId = null;
+let openDmWith = null;
+let dmTypingRef = null;
+
+function dmIdFor(a, b) {
+  return [a, b].sort().join("_");
+}
+
+function initLobbyTabs() {
+  $("tab-rooms").onclick = () => switchLobbyTab("rooms");
+  $("tab-friends").onclick = () => switchLobbyTab("friends");
+  $("tab-dms").onclick = () => switchLobbyTab("dms");
+}
+
+function loadDmList() {
+  dmListListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  dmListListeners = [];
+  dmPrimed = false;
+
+  const idxRef = ref(db, `myDms/${currentUser.uid}`);
+  const idxCb = (snap) => {
+    dmIndex = snap.val() || {};
+    if (!dmPrimed) {
+      dmPrimed = true;
+      for (const [id, d] of Object.entries(dmIndex)) dmSeen[id] = d.updatedAt || 0;
+    } else {
+      for (const [id, d] of Object.entries(dmIndex)) {
+        if ((d.updatedAt || 0) > (dmSeen[id] || 0) && id !== openDmId && d.lastByUid !== currentUser.uid) {
+          pushNotify(`💬 ${d.withName}`, (d.lastText || "").slice(0, 120), () => openDM(d.withUid, d.withName));
+        }
+        dmSeen[id] = Math.max(dmSeen[id] || 0, d.updatedAt || 0);
+      }
+    }
+    renderDmList();
+  };
+  onValue(idxRef, idxCb);
+  dmListListeners.push({ ref: idxRef, event: "value", cb: idxCb });
+
+  const unRef = ref(db, `dmUnread/${currentUser.uid}`);
+  const unCb = (snap) => {
+    dmUnreadCounts = snap.val() || {};
+    renderDmList();
+  };
+  onValue(unRef, unCb);
+  dmListListeners.push({ ref: unRef, event: "value", cb: unCb });
+}
+
+function renderDmList() {
+  const box = $("dm-list");
+  if (!box) return;
+  box.innerHTML = "";
+  const ids = Object.keys(dmIndex).sort((a, b) => (dmIndex[b].updatedAt || 0) - (dmIndex[a].updatedAt || 0));
+  const total = Object.values(dmUnreadCounts).reduce((n, c) => n + (Number(c) || 0), 0);
+  const badge = $("dms-badge");
+  badge.textContent = total > 0 ? total : "";
+  badge.classList.toggle("hidden", total === 0);
+  if (!ids.length) {
+    box.innerHTML = '<p class="empty-state" style="padding:16px">No conversations yet — click any avatar, then Message.</p>';
+    return;
+  }
+  ids.forEach(id => {
+    const d = dmIndex[id];
+    const name = userCache[d.withUid]?.username || d.withName;
+    const photo = (userCache[d.withUid] || {}).photoURL;
+    const unread = Number(dmUnreadCounts[id]) || 0;
+    const item = document.createElement("div");
+    item.className = "admin-item";
+    item.innerHTML = `
+      <span class="avatar" data-uid="${escapeHtml(d.withUid)}" data-name="${escapeHtml(name)}">${avatarInner(name, photo)}</span>
+      <div class="admin-item-info">
+        <h5>${escapeHtml(name)}</h5>
+        <p class="dm-snippet">${escapeHtml((d.lastText || "").slice(0, 60))}</p>
+      </div>
+      <div class="admin-item-actions">
+        ${unread > 0 ? `<span class="mention-badge">${unread}</span>` : ""}
+      </div>`;
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".avatar")) return; // avatar opens the profile popup instead
+      openDM(d.withUid, name);
+    });
+    box.appendChild(item);
+  });
+}
+
+async function openDM(withUid, withName) {
+  closeDmViewListeners();
+  openDmId = dmIdFor(currentUser.uid, withUid);
+  openDmWith = { uid: withUid, name: withName };
+  const photo = (userCache[withUid] || {}).photoURL;
+  const av = $("dm-avatar");
+  av.dataset.uid = withUid;
+  av.dataset.name = withName;
+  av.innerHTML = avatarInner(withName, photo);
+  $("dm-name").textContent = withName;
+  $("dm-messages").innerHTML = "";
+  $("dm-typing").classList.add("hidden");
+  showScreen("dm");
+  // Mark read
+  remove(ref(db, `dmUnread/${currentUser.uid}/${openDmId}`)).catch(() => {});
+  dmSeen[openDmId] = Date.now();
+  const dmId = openDmId;
+  const msgsRef = query(ref(db, `dms/${dmId}/messages`), orderByChild("timestamp"), limitToLast(100));
+  const addedCb = (snap) => appendDmMessage(snap.key, snap.val());
+  const removedCb = (snap) => {
+    document.querySelector(`#dm-messages .message[data-msg-id="${snap.key}"]`)?.remove();
+  };
+  onChildAdded(msgsRef, addedCb);
+  onChildRemoved(msgsRef, removedCb);
+  dmViewListeners.push({ ref: msgsRef, event: "child_added", cb: addedCb });
+  dmViewListeners.push({ ref: msgsRef, event: "child_removed", cb: removedCb });
+  setupDmTyping(dmId);
+}
+
+function appendDmMessage(msgId, msg) {
+  if (!msg) return;
+  const container = $("dm-messages");
+  if (container.querySelector(`[data-msg-id="${msgId}"]`)) return;
+  const isOwn = msg.uid === currentUser.uid;
+  const div = document.createElement("div");
+  div.className = `message ${isOwn ? "own" : "other"}`;
+  div.dataset.msgId = msgId;
+  const isMsgAdmin = adminUids.has(msg.uid);
+  const isMsgOwner = !isMsgAdmin && isOwnerName(msg.username);
+  div.innerHTML = `
+    <div class="message-header">
+      <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
+      <span class="message-username">${escapeHtml(msg.username)}</span>
+      ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""}
+      <span class="message-time">${formatTime(msg.timestamp)}</span>
+    </div>
+    <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}</div>
+  `;
+  if (isOwn) {
+    const del = document.createElement("button");
+    del.className = "msg-delete";
+    del.title = "Delete message";
+    del.textContent = "🗑️";
+    del.addEventListener("click", () => {
+      showConfirmModal(
+        "Delete this message?",
+        `<p style="color:var(--text-secondary)">${escapeHtml((msg.text || "").slice(0, 120))}</p>`,
+        "Delete",
+        () => remove(ref(db, `dms/${openDmId}/messages/${msgId}`))
+      );
+    });
+    div.querySelector(".message-header").appendChild(del);
+  }
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function setupDmTyping(dmId) {
+  dmTypingRef = ref(db, `dms/${dmId}/typing/${currentUser.uid}`);
+  const input = $("dm-input");
+  input.oninput = () => {
+    if (input.value.trim()) set(dmTypingRef, { username: getUsername() }).catch(() => {});
+    else remove(dmTypingRef).catch(() => {});
+  };
+  const otherRef = ref(db, `dms/${dmId}/typing`);
+  const cb = (snap) => {
+    const typing = snap.val() || {};
+    const names = Object.values(typing).map(t => t.username).filter(n => n && n !== getUsername());
+    const indicator = $("dm-typing");
+    if (names.length > 0) {
+      indicator.textContent = `${names.join(", ")} ${names.length === 1 ? "is" : "are"} typing...`;
+      indicator.classList.remove("hidden");
+    } else {
+      indicator.classList.add("hidden");
+    }
+  };
+  onValue(otherRef, cb);
+  dmViewListeners.push({ ref: otherRef, event: "value", cb });
+}
+
+function closeDmViewListeners() {
+  dmViewListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  dmViewListeners = [];
+  if (dmTypingRef) {
+    remove(dmTypingRef).catch(() => {});
+    dmTypingRef = null;
+  }
+}
+
+function closeDM() {
+  closeDmViewListeners();
+  openDmId = null;
+  openDmWith = null;
+  $("dm-messages").innerHTML = "";
+  showScreen("lobby");
+}
+
+function detachDmAll() {
+  closeDmViewListeners();
+  dmListListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  dmListListeners = [];
+  openDmId = null;
+  openDmWith = null;
+  dmIndex = {};
+  dmUnreadCounts = {};
+  dmSeen = {};
+  dmPrimed = false;
+}
+
+function initDM() {
+  $("dm-back-btn").addEventListener("click", closeDM);
+  $("dm-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (isBanned || !openDmId || !openDmWith) return;
+    const input = $("dm-input");
+    const text = input.value.trim();
+    if (!text) return;
+    const dmId = openDmId;
+    const them = openDmWith.uid;
+    await push(ref(db, `dms/${dmId}/messages`), {
+      uid: currentUser.uid,
+      username: getUsername(),
+      text: text,
+      timestamp: serverTimestamp()
+    });
+    const preview = text.slice(0, 80);
+    update(ref(db, `myDms/${currentUser.uid}/${dmId}`), {
+      withUid: them, withName: openDmWith.name, lastText: preview,
+      lastByUid: currentUser.uid, updatedAt: serverTimestamp()
+    }).catch(() => {});
+    update(ref(db, `myDms/${them}/${dmId}`), {
+      withUid: currentUser.uid, withName: getUsername(), lastText: preview,
+      lastByUid: currentUser.uid, updatedAt: serverTimestamp()
+    }).catch(() => {});
+    runTransaction(ref(db, `dmUnread/${them}/${dmId}`), (c) => (Number(c) || 0) + 1).catch(() => {});
+    input.value = "";
+    if (dmTypingRef) remove(dmTypingRef).catch(() => {});
+  });
+}
+
 // ============ NAVIGATION ============
 function initNavigation() {
   $("back-btn").addEventListener("click", leaveRoom);
@@ -2376,6 +2632,8 @@ document.addEventListener("DOMContentLoaded", () => {
   initThemes();
   initAnnouncements();
   initNotifications();
+  initLobbyTabs();
+  initDM();
 });
 
 function initGamesUI() {

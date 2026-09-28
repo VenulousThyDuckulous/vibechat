@@ -77,6 +77,7 @@
           <div class="lobby-tabs">
             <button id="tab-rooms" class="lobby-tab active">Rooms</button>
             <button id="tab-friends" class="lobby-tab">Friends <span id="friends-badge" class="tab-badge hidden"></span></button>
+            <button id="tab-dms" class="lobby-tab">DMs <span id="dms-badge" class="tab-badge hidden"></span></button>
           </div>
           <div id="room-list" class="room-list">
             <p class="empty-state">No rooms yet — create one!</p>
@@ -89,6 +90,12 @@
             <div class="friends-section">
               <h3>Friends</h3>
               <div id="friend-list"></div>
+            </div>
+          </div>
+          <div id="dms-panel" class="hidden">
+            <div class="friends-section">
+              <h3>Messages</h3>
+              <div id="dm-list"></div>
             </div>
           </div>
         </div>
@@ -176,6 +183,27 @@
         <form id="ann-form" class="message-form hidden">
           <input type="text" id="ann-input" placeholder="Post an announcement..." autocomplete="off" maxlength="500" />
           <button type="submit" class="btn btn-primary">Post</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DIRECT MESSAGES ============ -->
+  <div id="dm-screen" class="screen">
+    <div class="chat-container">
+      <div class="chat-main">
+        <div class="sidebar-header">
+          <button id="dm-back-btn" class="btn btn-ghost">← Lobby</button>
+          <div class="dm-peer">
+            <span id="dm-avatar" class="avatar"></span>
+            <h3 id="dm-name"></h3>
+          </div>
+        </div>
+        <div id="dm-messages" class="messages"></div>
+        <div id="dm-typing" class="typing-indicator hidden"></div>
+        <form id="dm-form" class="message-form">
+          <input type="text" id="dm-input" placeholder="Message..." autocomplete="off" maxlength="500" />
+          <button type="submit" id="dm-send" class="btn btn-primary">Send</button>
         </form>
       </div>
     </div>

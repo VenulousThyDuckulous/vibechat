@@ -20,6 +20,7 @@ A chill place to hang out and chat in real time.
 - 🖼️ Profile pictures, username & password changes
 - 📝 Profile bios (click any avatar to view)
 - 🤝 Friends with requests
+- 💬 Direct messages with unread badges
 - 🚪 Real room membership — join/leave, saved room passwords
 - 📣 @mentions + owner-only @everyone, with unread badges
 - ↩️ Message replies that ping the author
