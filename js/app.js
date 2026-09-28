@@ -2,7 +2,7 @@
 //  VibeChat — Main App Module
 // ============================================================
 
-import { auth, db, ADMIN_UIDS, OWNER_USERNAMES, VAPID_KEY } from "./firebase-config.js";
+import { auth, db, ADMIN_UIDS, OWNER_USERNAMES, VAPID_KEY, GIPHY_API_KEY } from "./firebase-config.js";
 import { initGames, closeGame } from "./games.js";
 import {
   signInWithEmailAndPassword,
@@ -780,6 +780,7 @@ async function joinRoom(roomId, data) {
   detachActiveListeners();
   currentPresence = {};
   hideMentionMenu();
+  document.querySelector(".gif-picker")?.classList.add("hidden");
   currentRoomId = roomId;
   currentRoom = data;
   $("chat-room-name").textContent = data.name;
@@ -813,6 +814,7 @@ function leaveRoom() {
   detachActiveListeners();
   currentPresence = {};
   hideMentionMenu();
+  document.querySelector(".gif-picker")?.classList.add("hidden");
   if (presenceRef) {
     remove(presenceRef);
     presenceRef = null;
@@ -1023,6 +1025,99 @@ function initChat() {
     input.setSelectionRange(newPos, newPos);
     updateMentionMenu();
   });
+
+  // GIF picker (Giphy)
+  $("gif-btn").addEventListener("click", toggleGifPicker);
+}
+
+// ============ GIF PICKER (GIPHY) ============
+function toggleGifPicker() {
+  let picker = document.querySelector(".gif-picker");
+  if (picker) {
+    picker.classList.toggle("hidden");
+    return;
+  }
+
+  picker = document.createElement("div");
+  picker.className = "gif-picker";
+  picker.innerHTML = `
+    <div class="gif-search-row">
+      <input type="text" id="gif-search" placeholder="Search GIFs..." autocomplete="off" />
+    </div>
+    <div class="gif-grid"></div>
+    <div class="gif-attrib">Powered by GIPHY</div>
+  `;
+  document.querySelector(".chat-main").appendChild(picker);
+
+  const grid = picker.querySelector(".gif-grid");
+  const search = picker.querySelector("#gif-search");
+  let debounce;
+  search.addEventListener("input", () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => loadGifs(grid, search.value.trim()), 400);
+  });
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      clearTimeout(debounce);
+      loadGifs(grid, search.value.trim());
+    }
+  });
+  loadGifs(grid, "");
+}
+
+async function loadGifs(grid, q) {
+  if (!GIPHY_API_KEY || GIPHY_API_KEY === "YOUR_GIPHY_KEY") {
+    grid.innerHTML = '<p class="gif-status">GIFs need a Giphy API key — ask the owner to add one.</p>';
+    return;
+  }
+  grid.innerHTML = '<p class="gif-status">Loading…</p>';
+  try {
+    const base = q
+      ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(q)}&limit=20&rating=g`
+      : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=20&rating=g`;
+    const res = await fetch(base);
+    if (!res.ok) throw new Error(`Giphy ${res.status}`);
+    const data = await res.json();
+    grid.innerHTML = "";
+    if (!data.data?.length) {
+      grid.innerHTML = '<p class="gif-status">No GIFs found.</p>';
+      return;
+    }
+    data.data.forEach(g => {
+      const tiny = g.images?.fixed_height_small?.url || g.images?.preview_gif?.url;
+      const full = g.images?.downsized_large?.url || g.images?.original?.url || tiny;
+      if (!tiny || !full) return;
+      const img = document.createElement("img");
+      img.src = tiny;
+      img.loading = "lazy";
+      img.alt = g.title || "GIF";
+      img.title = g.title || "GIF";
+      img.addEventListener("click", () => sendGif(full));
+      grid.appendChild(img);
+    });
+  } catch (err) {
+    console.error("GIF load failed:", err);
+    grid.innerHTML = '<p class="gif-status">Could not load GIFs. Try again.</p>';
+  }
+}
+
+async function sendGif(url) {
+  if (!currentRoomId || isBanned || !currentUser) return;
+  const picker = document.querySelector(".gif-picker");
+  if (picker) picker.classList.add("hidden");
+  try {
+    await push(ref(db, `rooms/${currentRoomId}/messages`), {
+      uid: currentUser.uid,
+      username: getUsername(),
+      text: "🎬 GIF",
+      imageUrl: url,
+      timestamp: serverTimestamp()
+    });
+  } catch (err) {
+    console.error("GIF send failed:", err);
+    showToast("Could not send GIF", "error");
+  }
 }
 
 function showConfirmModal(title, bodyHtml, confirmText, onConfirm) {

@@ -33,8 +33,12 @@ const OWNER_USERNAMES = [
 // Firebase Console → Project settings → Cloud Messaging → Web Push certificates
 const VAPID_KEY = "BO4_Vl4EIk3rInui70Epl_-Nq713sh4wvHdcTgDX-f47ohGu7xgWmeJBx9sW-CdczzbVFGMJtLaDA1egrsF1uVs";
 
+// Giphy API key for the GIF picker — paste the key your friend sent you here.
+// Until set, the GIF button shows a setup hint.
+const GIPHY_API_KEY = "YOUR_GIPHY_KEY";
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
 
-export { app, auth, db, ADMIN_UIDS, OWNER_USERNAMES, VAPID_KEY };
+export { app, auth, db, ADMIN_UIDS, OWNER_USERNAMES, VAPID_KEY, GIPHY_API_KEY };
