@@ -7,8 +7,12 @@ import {
   ref,
   get,
   set,
+  runTransaction,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// Coins per score point, per game (scores live on very different scales)
+const COIN_RATES = { flappy: 2, snake: 2, breakout: 0.1, memory: 0.05, wave: 1 };
 
 let activeGame = null;
 
@@ -68,6 +72,10 @@ function makeApi(gameId) {
               at: serverTimestamp()
             });
           }
+          // Coins for playing (capped per game)
+          const earned = Math.max(1, Math.min(150, Math.round(score * (COIN_RATES[gameId] ?? 0.5))));
+          await runTransaction(ref(db, `users/${user.uid}/coins`), (c) => (c || 0) + earned);
+          window.dispatchEvent(new CustomEvent("vibechat-coins", { detail: earned }));
         }
       } catch (err) {
         console.error("Highscore save failed:", err);

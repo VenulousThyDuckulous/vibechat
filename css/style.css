@@ -372,6 +372,8 @@ input::placeholder {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .user-info span {
@@ -1236,6 +1238,7 @@ input::placeholder {
   overflow: hidden;
   flex-shrink: 0;
   background: var(--bg-tertiary);
+  position: relative;
 }
 
 .avatar img {
@@ -1288,6 +1291,66 @@ input::placeholder {
   display: flex;
   justify-content: center;
   margin-bottom: 12px;
+}
+
+/* ============ AVATAR FRAMES (shop, pure CSS) ============ */
+.frame-gold { outline: 3px solid #ffd700; outline-offset: 2px; box-shadow: 0 0 12px rgba(255, 215, 0, 0.7); }
+.frame-neon { outline: 2px solid #00f0ff; outline-offset: 2px; box-shadow: 0 0 14px rgba(0, 240, 255, 0.8); }
+.frame-royal { outline: 2px solid #b366ff; outline-offset: 2px; box-shadow: 0 0 0 4px rgba(179, 102, 255, 0.35), 0 0 14px rgba(179, 102, 255, 0.8); }
+.frame-rainbow { box-shadow: 0 0 0 2px #ff3b3b, 0 0 0 4px #ff9f1a, 0 0 0 6px #ffee00, 0 0 0 8px #3ecf8e, 0 0 0 10px #3aa8e0, 0 0 0 12px #b366ff; }
+.frame-pixel { border-radius: 6px; outline: 2px dashed #7cfc00; outline-offset: 2px; }
+.frame-abyss { outline: 3px solid #1e90ff; outline-offset: 2px; box-shadow: 0 0 12px rgba(30, 144, 255, 0.8); }
+.frame-sunset { box-shadow: 0 0 0 2px #ff6b35, 0 0 12px 3px rgba(255, 107, 53, 0.65); }
+.frame-frost { outline: 2px solid #cfefff; outline-offset: 2px; box-shadow: 0 0 12px rgba(207, 239, 255, 0.8); }
+.frame-shadow { outline: 2px solid #5c0000; outline-offset: 2px; box-shadow: 0 0 14px rgba(255, 30, 30, 0.55); }
+
+/* ============ COINS + SHOP ============ */
+.coin-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 3px 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.frames-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.frame-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 6px 10px;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.frame-item .avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 1rem;
+}
+
+.frame-item .frame-name {
+  font-weight: 600;
+}
+
+.frame-item .btn-small {
+  font-size: 0.75rem;
+  padding: 5px 8px;
 }
 
 .bio-text {

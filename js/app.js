@@ -48,6 +48,9 @@ let currentPresence = {};
 let mentionMenuState = { open: false, items: [], highlight: 0 };
 let replyTarget = null;
 let myRooms = new Set();
+let coinBalance = 0;
+let avatarDraft = null;
+let coinListenerRef = null;
 let friendListeners = [];
 let friendsCache = {};
 let requestsCache = {};
@@ -224,6 +227,37 @@ function paintHeaderAvatar() {
   el.dataset.uid = currentUser.uid;
   el.dataset.name = getUsername();
   el.innerHTML = avatarInner(getUsername(), (userCache[currentUser.uid] || {}).photoURL);
+  syncFrameClass(el, currentUser.uid);
+}
+
+// Frames the shop sells (pure CSS, see style.css)
+const FRAMES = [
+  { id: "gold", name: "24K Gold", price: 100 },
+  { id: "neon", name: "Neon", price: 150 },
+  { id: "royal", name: "Royal", price: 250 },
+  { id: "rainbow", name: "Rainbow", price: 400 },
+  { id: "pixel", name: "8-Bit", price: 75 },
+  { id: "abyss", name: "Abyss", price: 150 },
+  { id: "sunset", name: "Sunset", price: 200 },
+  { id: "frost", name: "Frost", price: 125 },
+  { id: "shadow", name: "Shadow", price: 300 }
+];
+
+function equippedFrame(uid) {
+  return (userCache[uid] || {}).equippedFrame || null;
+}
+
+function syncFrameClass(el, uid) {
+  [...el.classList].forEach(c => {
+    if (c.startsWith("frame-")) el.classList.remove(c);
+  });
+  const f = equippedFrame(uid);
+  if (f) el.classList.add(`frame-${f}`);
+}
+
+function paintFramesIn(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll(".avatar[data-uid]").forEach(el => syncFrameClass(el, el.dataset.uid));
 }
 
 // Downscale an image file to a small square JPEG data URL (no Storage needed)
@@ -430,6 +464,7 @@ function updateMentionMenu() {
       menu.appendChild(row);
     });
   }
+  paintFramesIn(menu);
   menu.classList.remove("hidden");
 }
 
@@ -489,6 +524,7 @@ function initAuth() {
       detachActiveListeners();
       stopNotifListeners();
       stopFriends();
+      stopCoinListener();
       detachDmAll();
       closeAnnListeners();
       if (presenceRef && currentUser) {
@@ -717,6 +753,7 @@ async function loadUserProfile() {
   loadDmList();
   updateAnnouncementsBadge();
   startNotifListeners();
+  startCoinListener();
   if (notifEnabled()) registerPushToken();
 }
 
@@ -1029,6 +1066,7 @@ function setupPresence(roomId) {
       li.innerHTML = `<span class="online-dot"></span><span class="avatar" data-uid="${escapeHtml(uid)}" data-name="${escapeHtml(u.username)}">${avatarInner(u.username, (userCache[uid] || {}).photoURL)}</span> ${escapeHtml(u.username)}`;
       list.appendChild(li);
     });
+    paintFramesIn(list);
     if (mentionMenuState.open) updateMentionMenu();
   };
   onValue(presenceListRef, presenceCb);
@@ -1113,6 +1151,7 @@ function appendMessage(msgId, msg) {
     $("message-input").focus();
   });
   header.appendChild(rpl);
+  paintFramesIn(div);
   container.scrollTop = container.scrollHeight;
 }
 
@@ -1360,8 +1399,8 @@ let pendingAvatar = null;
 
 function openProfileModal() {
   const overlay = $("modal-overlay");
-  const currentPhoto = (userCache[currentUser.uid] || {}).photoURL || null;
-  pendingAvatar = null;
+  const currentPhoto = avatarDraft || (userCache[currentUser.uid] || {}).photoURL || null;
+  pendingAvatar = avatarDraft;
   $("modal-title").textContent = "Your Profile";
   $("modal-body").innerHTML = `
     <div class="profile-preview"><span id="profile-preview-avatar" class="avatar avatar-lg">${avatarInner(getUsername(), currentPhoto)}</span></div>
@@ -1371,6 +1410,10 @@ function openProfileModal() {
     <div class="profile-section">
       <h4>Bio</h4>
       <textarea id="profile-bio" maxlength="150" rows="3" placeholder="Say something about yourself..."></textarea>
+    </div>
+    <div class="profile-section">
+      <h4>Frames <span id="shop-balance" class="coin-pill">🪙 0</span></h4>
+      <div id="frames-grid" class="frames-grid"></div>
     </div>
     <div class="profile-section">
       <h4>Change username</h4>
@@ -1393,6 +1436,8 @@ function openProfileModal() {
   $("modal-cancel").onclick = () => overlay.classList.add("hidden");
   overlay.classList.remove("hidden");
   $("profile-bio").value = (userCache[currentUser.uid] || {}).bio || "";
+  syncFrameClass($("profile-preview-avatar"), currentUser.uid);
+  renderFramesShop();
 
   $("profile-file").addEventListener("change", async (e) => {
     const file = e.target.files[0];
@@ -1403,6 +1448,7 @@ function openProfileModal() {
     }
     try {
       pendingAvatar = await processAvatar(file);
+      avatarDraft = pendingAvatar;
       $("profile-preview-avatar").innerHTML = avatarInner(getUsername(), pendingAvatar);
     } catch (err) {
       console.error("Avatar processing failed:", err);
@@ -1414,6 +1460,8 @@ function openProfileModal() {
     try {
       await update(ref(db, `users/${currentUser.uid}`), { photoURL: null });
       if (userCache[currentUser.uid]) userCache[currentUser.uid].photoURL = null;
+      pendingAvatar = null;
+      avatarDraft = null;
       overlay.classList.add("hidden");
       paintHeaderAvatar();
       paintAvatars(currentUser.uid);
@@ -1443,9 +1491,12 @@ async function saveProfile() {
     if (!userCache[currentUser.uid]) userCache[currentUser.uid] = {};
     Object.assign(userCache[currentUser.uid], updates);
     userCache[currentUser.uid].username = getUsername();
+    pendingAvatar = null;
+    avatarDraft = null;
     overlay.classList.add("hidden");
     paintHeaderAvatar();
     paintAvatars(currentUser.uid);
+    paintFramesIn(document);
     showToast("Profile updated");
   } catch (err) {
     console.error("Profile save failed:", err);
@@ -1460,12 +1511,13 @@ function openProfileView(uid, fallbackName) {
     : adminUids.has(uid) ? '<span class="message-admin-badge">ADMIN</span>' : "";
   $("modal-title").textContent = name;
   $("modal-body").innerHTML = `
-    <div class="profile-preview"><span class="avatar avatar-lg">${avatarInner(name, p.photoURL)}</span></div>
+    <div class="profile-preview"><span id="profile-view-avatar" class="avatar avatar-lg">${avatarInner(name, p.photoURL)}</span></div>
     <p style="text-align:center;font-weight:700">${escapeHtml(name)} ${badges}</p>
     <p class="bio-text">${p.bio ? escapeHtml(p.bio) : '<span class="bio-empty">No bio yet.</span>'}</p>
     <div id="profile-friend-action" style="display:flex;justify-content:center;margin-top:12px"></div>
     <div id="profile-msg-action" style="display:flex;justify-content:center;margin-top:8px"></div>
   `;
+  syncFrameClass($("modal-body").querySelector("#profile-view-avatar"), uid);
   renderFriendAction(uid, $("modal-body").querySelector("#profile-friend-action"));
   const msgBox = $("modal-body").querySelector("#profile-msg-action");
   msgBox.innerHTML = "";
@@ -1485,6 +1537,122 @@ function openProfileView(uid, fallbackName) {
   cancelBtn.textContent = "Close";
   cancelBtn.onclick = () => $("modal-overlay").classList.add("hidden");
   $("modal-overlay").classList.remove("hidden");
+}
+
+function renderFramesShop() {
+  const grid = $("frames-grid");
+  if (!grid || !currentUser) return;
+  const me = userCache[currentUser.uid] || {};
+  const owned = (me.frames && me.frames.owned) || {};
+  const equipped = me.equippedFrame || null;
+  const myName = getUsername();
+  const myPhoto = me.photoURL || null;
+  const bal = $("shop-balance");
+  if (bal) bal.textContent = `🪙 ${coinBalance}`;
+  grid.innerHTML = "";
+  FRAMES.forEach(f => {
+    const item = document.createElement("div");
+    item.className = "frame-item";
+    const isEquipped = equipped === f.id;
+    const isOwned = !!owned[f.id];
+    item.innerHTML = `
+      <span class="avatar frame-${f.id}">${avatarInner(myName, myPhoto)}</span>
+      <span class="frame-name">${f.name}</span>
+    `;
+    const btn = document.createElement("button");
+    if (isEquipped) {
+      btn.className = "btn btn-ghost btn-small";
+      btn.textContent = "Equipped ✓";
+      btn.title = "Click to remove";
+      btn.addEventListener("click", () => unequipFrame());
+    } else if (isOwned) {
+      btn.className = "btn btn-primary btn-small";
+      btn.textContent = "Equip";
+      btn.addEventListener("click", () => equipFrame(f.id, f.name));
+    } else {
+      btn.className = "btn btn-ghost btn-small";
+      btn.textContent = `Buy 🪙${f.price}`;
+      btn.addEventListener("click", () => buyFrame(f.id, f.name, f.price));
+    }
+    item.appendChild(btn);
+    grid.appendChild(item);
+  });
+}
+
+async function buyFrame(id, name, price) {
+  try {
+    const res = await runTransaction(ref(db, `users/${currentUser.uid}/coins`), (c) => {
+      if ((c || 0) < price) return; // abort: can't afford it
+      return c - price;
+    });
+    if (!res.committed) {
+      showToast(`Need 🪙${price} for ${name} — play games to earn more!`, "error");
+      return;
+    }
+    await update(ref(db, `users/${currentUser.uid}`), {
+      [`frames/owned/${id}`]: true,
+      equippedFrame: id
+    });
+    const me = userCache[currentUser.uid] || (userCache[currentUser.uid] = {});
+    me.coins = res.snapshot.val() || 0;
+    me.frames = me.frames || {};
+    me.frames.owned = { ...(me.frames.owned || {}), [id]: true };
+    me.equippedFrame = id;
+    coinBalance = me.coins;
+    paintFramesIn(document);
+    renderFramesShop();
+    showToast(`${name} frame equipped!`);
+  } catch (err) {
+    console.error("Frame buy failed:", err);
+    showToast(`Couldn't buy frame (${err.code || err.message})`, "error");
+  }
+}
+
+async function equipFrame(id, name) {
+  try {
+    await update(ref(db, `users/${currentUser.uid}`), { equippedFrame: id });
+    const me = userCache[currentUser.uid] || (userCache[currentUser.uid] = {});
+    me.equippedFrame = id;
+    paintFramesIn(document);
+    renderFramesShop();
+    showToast(`${name} frame equipped!`);
+  } catch (err) {
+    console.error("Frame equip failed:", err);
+    showToast("Couldn't equip frame", "error");
+  }
+}
+
+async function unequipFrame() {
+  try {
+    await update(ref(db, `users/${currentUser.uid}`), { equippedFrame: null });
+    if (userCache[currentUser.uid]) userCache[currentUser.uid].equippedFrame = null;
+    paintFramesIn(document);
+    renderFramesShop();
+  } catch (err) {
+    console.error("Frame unequip failed:", err);
+  }
+}
+
+function startCoinListener() {
+  if (coinListenerRef || !currentUser) return;
+  coinListenerRef = ref(db, `users/${currentUser.uid}/coins`);
+  const cb = (snap) => {
+    coinBalance = snap.val() || 0;
+    const pill = $("coin-balance");
+    if (pill) pill.textContent = coinBalance;
+    const shop = $("shop-balance");
+    if (shop) shop.textContent = `🪙 ${coinBalance}`;
+    if (userCache[currentUser.uid]) userCache[currentUser.uid].coins = coinBalance;
+  };
+  onValue(coinListenerRef, cb);
+}
+
+function stopCoinListener() {
+  if (coinListenerRef) {
+    try { off(coinListenerRef); } catch (e) {}
+    coinListenerRef = null;
+  }
+  coinBalance = 0;
 }
 
 async function changeUsername() {
@@ -1726,6 +1894,7 @@ async function loadAdminData() {
       msgList.appendChild(item);
     });
   }
+  paintFramesIn($("admin-user-list"));
 }
 
 // Expose admin functions globally
@@ -1909,6 +2078,7 @@ function appendAnnouncement(msgId, msg) {
     header.appendChild(del);
   }
   container.appendChild(div);
+  paintFramesIn(div);
   container.scrollTop = container.scrollHeight;
 }
 
@@ -2265,6 +2435,7 @@ function renderFriends() {
       ]));
     });
   }
+  paintFramesIn($("friends-panel"));
 }
 
 async function sendFriendRequest(uid, username) {
@@ -2427,6 +2598,7 @@ function renderDmList() {
     });
     box.appendChild(item);
   });
+  paintFramesIn(box);
 }
 
 async function openDM(withUid, withName) {
@@ -2493,6 +2665,7 @@ function appendDmMessage(msgId, msg) {
     div.querySelector(".message-header").appendChild(del);
   }
   container.appendChild(div);
+  paintFramesIn(div);
   container.scrollTop = container.scrollHeight;
 }
 
@@ -2638,6 +2811,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function initGamesUI() {
   initGames();
+  window.addEventListener("vibechat-coins", (e) => showToast(`+${e.detail} 🪙`, "success", 2000));
   $("games-btn").addEventListener("click", () => showScreen("games"));
   $("games-back-btn").addEventListener("click", () => {
     closeGame();

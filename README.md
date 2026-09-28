@@ -18,6 +18,7 @@ A chill place to hang out and chat in real time.
 - 🟢 See who's online in each room
 - ⌨️ Typing indicators
 - 🖼️ Profile pictures, username & password changes
+- 🪙 Game coins + avatar frames shop
 - 📝 Profile bios (click any avatar to view)
 - 🤝 Friends with requests
 - 💬 Direct messages with unread badges
