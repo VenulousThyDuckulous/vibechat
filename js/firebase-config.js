@@ -35,7 +35,7 @@ const VAPID_KEY = "BO4_Vl4EIk3rInui70Epl_-Nq713sh4wvHdcTgDX-f47ohGu7xgWmeJBx9sW-
 
 // Giphy API key for the GIF picker — paste the key your friend sent you here.
 // Until set, the GIF button shows a setup hint.
-const GIPHY_API_KEY = "YOUR_GIPHY_KEY";
+const GIPHY_API_KEY = "nHALIpaFelZd317PPnMbcZkbXGF8CwE1";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
