@@ -4,7 +4,7 @@
 //  Best with ~6 or fewer people per room (mesh bandwidth).
 // ============================================================
 
-import { db, auth } from "./firebase-config.js";
+import { db, auth, ADMIN_UIDS, OWNER_USERNAMES } from "./firebase-config.js";
 import {
   ref,
   push,
@@ -27,6 +27,11 @@ const SPEAK_THRESHOLD = 18; // analyser RMS level that counts as talking
 let lobbyListeners = [];
 let lobbyStarted = false;
 let roomCache = {};
+
+// User directory for tiles (photos, badges, plates, frames).
+// Refreshed on join; app.js owns the live copy for chat.
+let dirCache = {};
+let dirAdmins = new Set(ADMIN_UIDS);
 
 // Active call state (null when not in a voice room)
 let call = null;
@@ -141,6 +146,61 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+async function refreshDirectory() {
+  try {
+    const [uSnap, aSnap] = await Promise.all([
+      get(ref(db, "users")),
+      get(ref(db, "admins"))
+    ]);
+    dirCache = uSnap.val() || {};
+    const admins = aSnap.val() || {};
+    dirAdmins = new Set([...ADMIN_UIDS, ...Object.keys(admins).filter(k => admins[k] === true)]);
+  } catch (err) {
+    /* offline — keep whatever we have */
+  }
+}
+
+function dirIsOwner(name) {
+  return OWNER_USERNAMES.some(o => o.toLowerCase() === (name || "").toLowerCase());
+}
+
+function dirHue(name) {
+  let h = 0;
+  for (const c of (name || "?")) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+
+// Full tile content (avatar photo, badges, plate, frame). The live
+// voice-state line (muted/sharing) is preserved across repaints.
+function paintTileContent(tile, uid, fallbackName, isSelf) {
+  const p = dirCache[uid] || {};
+  const display = p.username || fallbackName;
+  const photo = p.photoURL || null;
+  const avatar = photo
+    ? `<img src="${escapeHtml(photo)}" alt="" />`
+    : `<span class="avatar-initial" style="background:hsl(${dirHue(display)},45%,45%)">${escapeHtml((display || "?").trim().charAt(0).toUpperCase())}</span>`;
+  const isAdmin = dirAdmins.has(uid);
+  const isOwner = !isAdmin && dirIsOwner(display);
+  const badges = isAdmin ? '<span class="message-admin-badge">ADMIN</span>'
+    : isOwner ? '<span class="message-admin-badge">OWNER</span>' : "";
+  const np = p.nameplate;
+  const plate = np?.text ? `<span class="plate plate-${np.theme || "classic"}">${escapeHtml(np.text.slice(0, 16))}</span>` : "";
+  const frame = p.equippedFrame ? ` frame-${p.equippedFrame}` : "";
+  const prevState = tile.querySelector(".voice-state")?.textContent || "";
+  tile.innerHTML = `
+    <span class="avatar${frame}" data-voice-avatar="${escapeHtml(uid)}">${avatar}</span>
+    <span class="voice-name">${escapeHtml(display)}${isSelf ? " (you)" : ""} ${badges} ${plate}</span>
+    <span class="voice-state">${escapeHtml(prevState)}</span>
+  `;
+}
+
+function repaintTile(uid) {
+  const tile = document.getElementById("voice-tiles")?.querySelector(`[data-voice-uid="${uid}"]`);
+  if (!tile || !call) return;
+  const entry = call.peers[uid];
+  paintTileContent(tile, uid, entry?.name || tile.dataset.voiceName || "user", uid === call.uid);
+}
+
 // ============ CALL ============
 export function inVoiceCall() {
   return !!call;
@@ -185,6 +245,8 @@ export async function joinVoiceRoom(roomId, roomName) {
   document.getElementById("voice-deafen-btn").textContent = "👂 Hearing";
   document.getElementById("voice-tiles").innerHTML = "";
   paintShareBtn();
+  await refreshDirectory();
+  if (!call || !call.alive) return;
   addTile(uid, myName(), true);
   showVoiceScreen();
   paintVoiceClose(roomId);
@@ -225,10 +287,16 @@ export async function joinVoiceRoom(roomId, roomName) {
     if (!call || snap.key === uid || call.peers[snap.key]) return;
     const peer = snap.val() || {};
     call.roster[snap.key] = peer;
+    if (!dirCache[snap.key]) {
+      await refreshDirectory();
+      if (!call) return;
+    }
     if (shouldOfferTo(joinedAt, uid, peer.joinedAt || 0, snap.key)) {
       try { await makeOffer(snap.key, peer.username || "user"); }
       catch (err) { console.error("Offer failed:", err); }
     }
+    // Otherwise they offer to us; their offer handler builds the tile
+    // from the directory we just refreshed.
   };
   const rosterRemoved = (snap) => {
     if (call) delete call.roster[snap.key];
@@ -238,10 +306,9 @@ export async function joinVoiceRoom(roomId, roomName) {
     if (!call || snap.key === uid) return;
     const peer = snap.val() || {};
     call.roster[snap.key] = peer;
+    repaintTile(snap.key);
     const entry = call.peers[snap.key];
     if (entry?.tile) {
-      const nameEl = entry.tile.querySelector(".voice-name");
-      if (nameEl) nameEl.textContent = peer.username || entry.name;
       const stateEl = entry.tile.querySelector(".voice-state");
       if (stateEl) stateEl.textContent = peer.muted ? "🔇" : (peer.sharing ? "🖥️ sharing" : "");
     }
@@ -553,12 +620,9 @@ function addTile(uid, name, isSelf) {
   const tile = document.createElement("div");
   tile.className = "voice-tile";
   tile.dataset.voiceUid = uid;
-  tile.innerHTML = `
-    <span class="avatar"><span class="avatar-initial">${escapeHtml((name || "?").trim().charAt(0).toUpperCase())}</span></span>
-    <span class="voice-name">${escapeHtml(name)}${isSelf ? " (you)" : ""}</span>
-    <span class="voice-state"></span>
-  `;
+  tile.dataset.voiceName = name;
   tiles.appendChild(tile);
+  paintTileContent(tile, uid, name, isSelf);
   const entry = call?.peers[uid];
   if (entry) entry.tile = tile;
   return tile;
