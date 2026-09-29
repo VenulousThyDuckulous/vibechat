@@ -780,6 +780,20 @@ function gbaEsc(str) {
   return div.innerHTML;
 }
 
+// Layered teardown: a new instance per ROM means the old one must die,
+// or you get double audio + 2x CPU (the classic "runs badly" symptom).
+function killEmu() {
+  try {
+    const emu = window.EJS_emulator;
+    if (emu) {
+      try { emu.pause?.(); } catch (e) { /* no pause API */ }
+      try { emu.callEvent?.("exit"); } catch (e) { /* no event API */ }
+    }
+  } catch (e) { /* already gone */ }
+  try { window.EJS_emulator = null; } catch (e) {}
+  document.querySelector('script[data-emu-loader]')?.remove();
+}
+
 async function gbaForgetCached() {
   if (!gbaCachedUrl) return;
   try {
@@ -870,16 +884,17 @@ function createGba(stage, api) {
   };
 
   function showPicker() {
+    killEmu();
     stage.querySelector("#emu-holder")?.remove();
     picker.classList.remove("hidden");
     picker.style.display = "";
+    setStatus("");
   }
 
   function startEmu(romUrl, label) {
     if (!alive) return;
+    killEmu();
     stage.querySelector("#emu-holder")?.remove();
-    document.querySelector('script[data-emu-loader]')?.remove();
-    try { window.EJS_emulator?.pause?.(); } catch (e) { /* not running */ }
 
     picker.style.display = "none";
     const holder = document.createElement("div");
@@ -955,7 +970,7 @@ function createGba(stage, api) {
   return {
     destroy() {
       alive = false;
-      try { window.EJS_emulator?.pause?.(); } catch (e) { /* not running */ }
+      killEmu();
       gbaForgetCached();
     }
   };
