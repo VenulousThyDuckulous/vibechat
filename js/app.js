@@ -2550,7 +2550,7 @@ async function registerPushToken() {
     if (!VAPID_KEY || VAPID_KEY === "YOUR_VAPID_KEY") return;
     if (!currentUser || Notification.permission !== "granted") return;
     const { getMessaging, getToken } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js");
-    const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+    const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js?v=2");
     const token = await getToken(getMessaging(), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
     if (!token) return;
     const snap = await get(ref(db, `pushTokens/${currentUser.uid}`));

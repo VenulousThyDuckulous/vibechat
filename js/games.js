@@ -808,7 +808,9 @@ async function gbaForgetCached() {
 // for control — not just activation.
 let emuDiagLine = "";
 async function ensureEmuSW(romUrl) {
-  const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+  // Versioned URL forces a fresh install (SW update checks can serve a
+  // stale cached copy for up to 24h otherwise).
+  const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js?v=2");
   let worker = reg.installing || reg.waiting || reg.active;
   try {
     await reg.update();
@@ -831,15 +833,8 @@ async function ensureEmuSW(romUrl) {
       worker.addEventListener("statechange", onChange);
     });
   }
-  if (!navigator.serviceWorker.controller) {
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("SW controller timeout")), 15000);
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        clearTimeout(timeout);
-        resolve();
-      }, { once: true });
-    });
-  }
+  // Record registrations BEFORE waiting, so the diagnostic line is
+  // always populated even if a later step times out.
   try {
     const regs = await navigator.serviceWorker.getRegistrations();
     emuDiagLine = regs.map(r => `${r.scope} [${r.active?.state || r.installing?.state || r.waiting?.state || "?"}]`).join(" | ") || "none";
@@ -848,6 +843,15 @@ async function ensureEmuSW(romUrl) {
   } catch (err) {
     if (err.message === "SW scope mismatch") throw err;
     /* getRegistrations failed — proceed, probe will tell us */
+  }
+  if (!navigator.serviceWorker.controller) {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("SW controller timeout")), 15000);
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        clearTimeout(timeout);
+        resolve();
+      }, { once: true });
+    });
   }
 }
 

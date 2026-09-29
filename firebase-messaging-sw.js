@@ -26,6 +26,9 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(clients.openWindow("https://venulousthyduckulous.github.io/vibechat/"));
 });
 
+// NOTE: bump the ?v= query in BOTH registration call sites
+// (registerPushToken in app.js, ensureEmuSW in games.js) whenever this
+// file changes — otherwise browsers may run a stale copy for up to 24h.
 self.addEventListener("install", (e) => {
   self.skipWaiting();
 });
