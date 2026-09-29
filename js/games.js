@@ -790,10 +790,10 @@ async function gbaForgetCached() {
 
 // The page-wide `ready` promise can pre-resolve via the FCM worker, so wait
 // for OUR worker to activate explicitly instead.
-async function ensureEmuSW() {
-  const reg = await navigator.serviceWorker.register("emu-rom-sw.js", {
-    scope: new URL("./emu-rom/", location.href).href
-  });
+let emuDiagLine = "";
+async function ensureEmuSW(romUrl) {
+  const scope = new URL("./emu-rom/", location.href).href;
+  const reg = await navigator.serviceWorker.register("emu-rom-sw.js", { scope });
   let worker = reg.installing || reg.waiting || reg.active;
   try {
     await reg.update();
@@ -815,6 +815,16 @@ async function ensureEmuSW() {
       };
       worker.addEventListener("statechange", onChange);
     });
+  }
+  // Verify some active worker actually covers our ROM URL, and record it.
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    emuDiagLine = regs.map(r => `${r.scope} [${r.active?.state || r.installing?.state || r.waiting?.state || "?"}]`).join(" | ") || "none";
+    const covered = regs.some(r => r.active && romUrl.startsWith(r.scope));
+    if (!covered) throw new Error("SW scope mismatch");
+  } catch (err) {
+    if (err.message === "SW scope mismatch") throw err;
+    /* getRegistrations failed — proceed, probe will tell us */
   }
 }
 
@@ -906,15 +916,15 @@ function createGba(stage, api) {
       await gbaForgetCached();
       gbaCachedUrl = romUrl;
       setStatus("Starting player…");
-      await ensureEmuSW();
+      await ensureEmuSW(romUrl);
       await probeEmuRom(romUrl);
       if (!alive) return;
       setStatus("");
       startEmu(romUrl, file.name);
     } catch (err) {
-      console.error("ROM staging failed:", err);
-      const msg = /probe|service worker|SW|controller|redundant|activation/i.test(err?.message || "")
-        ? "Player can't reach the staged ROM — try disabling adblockers/VPN and reloading the page."
+      console.error("ROM staging failed:", err, "| workers:", emuDiagLine);
+      const msg = /probe|service worker|SW|controller|redundant|activation|scope/i.test(err?.message || "")
+        ? "Player can't reach the staged ROM — open F12 Console and send me the red lines."
         : "Could not stage that file — try a direct ROM link instead.";
       setStatus(msg);
     }
