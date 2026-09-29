@@ -1750,6 +1750,12 @@ input::placeholder {
   color: var(--text-muted);
 }
 
+.emu-status {
+  font-size: 0.85rem;
+  color: var(--warning);
+  min-height: 1.2em;
+}
+
 #emu-holder {
   width: 100%;
   max-width: 640px;

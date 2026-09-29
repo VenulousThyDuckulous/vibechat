@@ -769,12 +769,23 @@ function createMemory(stage, api) {
 // ============ GBA EMULATOR (EmulatorJS) ============
 // ROMs are user-supplied (upload or URL) — nothing copyrighted ships
 // with the app. No BIOS file needed (built-in replacement).
-let gbaRomUrl = null;
+// Uploads are staged in Cache Storage and served over same-origin https
+// by emu-rom-sw.js, because the EmulatorJS loader refuses blob: URLs.
+let gbaCachedUrl = null;
 
 function gbaEsc(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
+}
+
+async function gbaForgetCached() {
+  if (!gbaCachedUrl) return;
+  try {
+    const cache = await caches.open("vibechat-emu-roms");
+    await cache.delete(gbaCachedUrl);
+  } catch (e) { /* cache unavailable — nothing to clean */ }
+  gbaCachedUrl = null;
 }
 
 function createGba(stage, api) {
@@ -789,8 +800,14 @@ function createGba(stage, api) {
     <div class="emu-or">— or paste a direct ROM link —</div>
     <input type="text" id="emu-url" placeholder="https://…/game.gba" autocomplete="off" />
     <button id="emu-url-btn" class="btn btn-primary">Load URL</button>
+    <p id="emu-status" class="emu-status"></p>
   `;
   stage.appendChild(picker);
+
+  const setStatus = (msg) => {
+    const el = picker.querySelector("#emu-status");
+    if (el) el.textContent = msg;
+  };
 
   function showPicker() {
     stage.querySelector("#emu-holder")?.remove();
@@ -803,10 +820,6 @@ function createGba(stage, api) {
     stage.querySelector("#emu-holder")?.remove();
     document.querySelector('script[data-emu-loader]')?.remove();
     try { window.EJS_emulator?.pause?.(); } catch (e) { /* not running */ }
-    if (gbaRomUrl && gbaRomUrl.startsWith("blob:")) {
-      try { URL.revokeObjectURL(gbaRomUrl); } catch (e) {}
-    }
-    gbaRomUrl = romUrl.startsWith("blob:") ? romUrl : null;
 
     picker.style.display = "none";
     const holder = document.createElement("div");
@@ -823,8 +836,9 @@ function createGba(stage, api) {
     window.EJS_gameUrl = romUrl;
     window.EJS_core = "gba";
     window.EJS_biosUrl = "";
+    window.EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
     const s = document.createElement("script");
-    s.src = "https://www.emulatorjs.com/loader.js";
+    s.src = "https://cdn.emulatorjs.org/stable/data/loader.js";
     s.dataset.emuLoader = "1";
     s.onerror = () => {
       const grid = holder.querySelector("#emu-game");
@@ -833,11 +847,34 @@ function createGba(stage, api) {
     document.body.appendChild(s);
   }
 
-  picker.querySelector("#emu-file").addEventListener("change", (e) => {
+  picker.querySelector("#emu-file").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     e.target.value = "";
-    if (!file) return;
-    startEmu(URL.createObjectURL(file), file.name);
+    if (!file || !alive) return;
+    if (!("serviceWorker" in navigator) || !window.caches || !location.href.startsWith("https://")) {
+      setStatus("Uploads need the hosted https site — or paste a direct ROM link instead.");
+      return;
+    }
+    setStatus("Staging ROM…");
+    try {
+      const safeName = (file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_") || "game.gba").slice(0, 80);
+      const romUrl = new URL(`./emu-rom/${Date.now()}-${safeName}`, location.href).href;
+      const buf = await file.arrayBuffer();
+      const cache = await caches.open("vibechat-emu-roms");
+      await cache.put(romUrl, new Response(buf));
+      await gbaForgetCached();
+      gbaCachedUrl = romUrl;
+      await navigator.serviceWorker.register("emu-rom-sw.js", {
+        scope: new URL("./emu-rom/", location.href).href
+      });
+      await navigator.serviceWorker.ready;
+      if (!alive) return;
+      setStatus("");
+      startEmu(romUrl, file.name);
+    } catch (err) {
+      console.error("ROM staging failed:", err);
+      setStatus("Could not stage that file — try a direct ROM link instead.");
+    }
   });
   const loadUrl = () => {
     const url = picker.querySelector("#emu-url").value.trim();
@@ -857,10 +894,7 @@ function createGba(stage, api) {
     destroy() {
       alive = false;
       try { window.EJS_emulator?.pause?.(); } catch (e) { /* not running */ }
-      if (gbaRomUrl && gbaRomUrl.startsWith("blob:")) {
-        try { URL.revokeObjectURL(gbaRomUrl); } catch (e) {}
-        gbaRomUrl = null;
-      }
+      gbaForgetCached();
     }
   };
 }
