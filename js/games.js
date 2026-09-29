@@ -788,6 +788,47 @@ async function gbaForgetCached() {
   gbaCachedUrl = null;
 }
 
+// The page-wide `ready` promise can pre-resolve via the FCM worker, so wait
+// for OUR worker to activate explicitly instead.
+async function ensureEmuSW() {
+  const reg = await navigator.serviceWorker.register("emu-rom-sw.js", {
+    scope: new URL("./emu-rom/", location.href).href
+  });
+  let worker = reg.installing || reg.waiting || reg.active;
+  try {
+    await reg.update();
+    worker = reg.installing || reg.waiting || reg.active || worker;
+  } catch (e) { /* offline-first update failed — proceed */ }
+  if (worker && worker.state !== "activated") {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("SW activation timeout")), 20000);
+      const onChange = () => {
+        if (worker.state === "activated") {
+          clearTimeout(timeout);
+          worker.removeEventListener("statechange", onChange);
+          resolve();
+        } else if (worker.state === "redundant") {
+          clearTimeout(timeout);
+          worker.removeEventListener("statechange", onChange);
+          reject(new Error("SW redundant"));
+        }
+      };
+      worker.addEventListener("statechange", onChange);
+    });
+  }
+}
+
+// Prove the staged ROM is retrievable before launching the player,
+// so a serving failure shows a clear message instead of a grey box.
+async function probeEmuRom(romUrl) {
+  const res = await fetch(romUrl);
+  if (!res.ok) throw new Error(`ROM probe HTTP ${res.status}`);
+  const reader = res.body.getReader();
+  const { value } = await reader.read();
+  try { reader.cancel(); } catch (e) {}
+  if (!value || !value.length) throw new Error("ROM probe empty");
+}
+
 function createGba(stage, api) {
   let alive = true;
 
@@ -864,16 +905,18 @@ function createGba(stage, api) {
       await cache.put(romUrl, new Response(buf));
       await gbaForgetCached();
       gbaCachedUrl = romUrl;
-      await navigator.serviceWorker.register("emu-rom-sw.js", {
-        scope: new URL("./emu-rom/", location.href).href
-      });
-      await navigator.serviceWorker.ready;
+      setStatus("Starting player…");
+      await ensureEmuSW();
+      await probeEmuRom(romUrl);
       if (!alive) return;
       setStatus("");
       startEmu(romUrl, file.name);
     } catch (err) {
       console.error("ROM staging failed:", err);
-      setStatus("Could not stage that file — try a direct ROM link instead.");
+      const msg = /probe|service worker|SW|controller|redundant|activation/i.test(err?.message || "")
+        ? "Player can't reach the staged ROM — try disabling adblockers/VPN and reloading the page."
+        : "Could not stage that file — try a direct ROM link instead.";
+      setStatus(msg);
     }
   });
   const loadUrl = () => {
