@@ -770,7 +770,8 @@ function createMemory(stage, api) {
 // ROMs are user-supplied (upload or URL) — nothing copyrighted ships
 // with the app. No BIOS file needed (built-in replacement).
 // Uploads are staged in Cache Storage and served over same-origin https
-// by emu-rom-sw.js, because the EmulatorJS loader refuses blob: URLs.
+// by the app service worker, because the EmulatorJS loader refuses
+// blob: URLs.
 let gbaCachedUrl = null;
 
 function gbaEsc(str) {
@@ -788,12 +789,12 @@ async function gbaForgetCached() {
   gbaCachedUrl = null;
 }
 
-// The page-wide `ready` promise can pre-resolve via the FCM worker, so wait
-// for OUR worker to activate explicitly instead.
+// The ROM worker must CONTROL this page for its fetches to be
+// intercepted, so register the app-wide worker (default scope) and wait
+// for control — not just activation.
 let emuDiagLine = "";
 async function ensureEmuSW(romUrl) {
-  const scope = new URL("./emu-rom/", location.href).href;
-  const reg = await navigator.serviceWorker.register("emu-rom-sw.js", { scope });
+  const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
   let worker = reg.installing || reg.waiting || reg.active;
   try {
     await reg.update();
@@ -816,7 +817,15 @@ async function ensureEmuSW(romUrl) {
       worker.addEventListener("statechange", onChange);
     });
   }
-  // Verify some active worker actually covers our ROM URL, and record it.
+  if (!navigator.serviceWorker.controller) {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("SW controller timeout")), 15000);
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        clearTimeout(timeout);
+        resolve();
+      }, { once: true });
+    });
+  }
   try {
     const regs = await navigator.serviceWorker.getRegistrations();
     emuDiagLine = regs.map(r => `${r.scope} [${r.active?.state || r.installing?.state || r.waiting?.state || "?"}]`).join(" | ") || "none";

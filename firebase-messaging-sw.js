@@ -1,5 +1,8 @@
-// Firebase Cloud Messaging service worker — shows push notifications
-// when the browser is closed/backgrounded. Queued by the notify workflow.
+// VibeChat service worker: push notifications + local ROM serving.
+//
+// ONE worker per scope: nested-scope workers can't intercept this page's
+// fetches (only the controlling worker's scope applies), so FCM and the
+// emulator ROM server live together here under /vibechat/.
 importScripts("https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js");
 
@@ -21,4 +24,27 @@ messaging.onBackgroundMessage((payload) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(clients.openWindow("https://venulousthyduckulous.github.io/vibechat/"));
+});
+
+self.addEventListener("install", (e) => {
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (e) => {
+  e.waitUntil(self.clients.claim());
+});
+
+// Serves user-uploaded ROMs staged by the page in Cache Storage under
+// /emu-rom/*. EmulatorJS only fetches games over http(s).
+self.addEventListener("fetch", (event) => {
+  let path = "";
+  try {
+    path = new URL(event.request.url).pathname;
+  } catch (e) {
+    return;
+  }
+  if (!path.includes("/emu-rom/")) return;
+  event.respondWith(
+    caches.match(event.request).then((res) => res || new Response("ROM not found", { status: 404 }))
+  );
 });
