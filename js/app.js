@@ -608,17 +608,26 @@ async function handleLogin(e) {
       localStorage.setItem("vibechat-username", username);
     } catch (legacyErr) {
       if (!["auth/invalid-credential", "auth/invalid-login-credentials", "auth/user-not-found", "auth/wrong-password"].includes(legacyErr.code)) throw legacyErr;
-      // Maybe a renamed display name — resolve via the username index.
-      const key = normalizeName(username);
-      if (!key) throw legacyErr;
-      const idxSnap = await get(ref(db, `usernames/${key}`));
-      const hit = idxSnap.val();
-      const uid = typeof hit === "string" ? hit : hit?.uid;
-      const profSnap = uid ? await get(ref(db, `users/${uid}`)) : null;
-      const login = profSnap?.val()?.login;
-      if (!uid || !login) throw legacyErr;
-      user = (await signInWithEmailAndPassword(auth, `${login}@vibechat.app`, password)).user;
-      localStorage.setItem("vibechat-username", profSnap.val()?.username || username);
+      // Maybe a renamed display name — resolve via the username index
+      // (publicly readable so logged-out users can use it).
+      let resolved = null;
+      try {
+        const key = normalizeName(username);
+        if (key) {
+          const idxSnap = await get(ref(db, `usernames/${key}`));
+          const hit = idxSnap.val();
+          const uid = typeof hit === "string" ? hit : hit?.uid;
+          const profSnap = uid ? await get(ref(db, `users/${uid}`)) : null;
+          const login = profSnap?.val()?.login;
+          if (uid && login) {
+            const cred2 = await signInWithEmailAndPassword(auth, `${login}@vibechat.app`, password);
+            resolved = { user: cred2.user, display: profSnap.val()?.username || username };
+          }
+        }
+      } catch (e) { /* fall through to the original login error below */ }
+      if (!resolved) throw legacyErr;
+      user = resolved.user;
+      localStorage.setItem("vibechat-username", resolved.display);
     }
     // Backfill profile + index if signup's DB writes previously failed
     try {
@@ -664,11 +673,10 @@ async function handleSignup(e) {
   }
 
   try {
-    const taken = await get(ref(db, `usernames/${key}`));
-    if (taken.exists()) {
-      showError("That username is taken");
-      return;
-    }
+    // No availability pre-check here: the login email is derived from the
+    // name, so Firebase Auth itself rejects taken usernames
+    // (email-already-in-use). A pre-check would read the DB while logged
+    // out, which the security rules forbid.
     const cred = await createUserWithEmailAndPassword(auth, usernameToEmail(username), password);
     localStorage.setItem("vibechat-username", username);
     // Store username in DB — don't block signup if this fails
