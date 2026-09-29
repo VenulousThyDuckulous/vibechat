@@ -4,6 +4,7 @@
 
 import { auth, db, ADMIN_UIDS, OWNER_USERNAMES, VAPID_KEY, GIPHY_API_KEY } from "./firebase-config.js";
 import { initGames, closeGame } from "./games.js";
+import { initVoiceTab, startVoiceLobby, stopVoiceLobby, leaveVoiceRoom, toggleMute, toggleDeafen } from "./voice.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -163,7 +164,8 @@ const screens = {
   admin: $("admin-screen"),
   games: $("games-screen"),
   announcements: $("announcements-screen"),
-  dm: $("dm-screen")
+  dm: $("dm-screen"),
+  voice: $("voice-screen")
 };
 
 // ============ UTILITIES ============
@@ -564,6 +566,8 @@ function initAuth() {
       stopFriends();
       stopCoinListener();
       detachDmAll();
+      leaveVoiceRoom();
+      stopVoiceLobby();
       closeAnnListeners();
       if (presenceRef && currentUser) {
         try { remove(presenceRef); } catch (e) {}
@@ -799,6 +803,7 @@ async function loadUserProfile() {
   loadDmList();
   updateAnnouncementsBadge();
   startNotifListeners();
+  startVoiceLobby();
   startCoinListener();
   if (notifEnabled()) registerPushToken();
 }
@@ -2573,15 +2578,6 @@ function initNotifications() {
 }
 
 // ============ FRIENDS ============
-function switchLobbyTab(which) {
-  $("tab-rooms").classList.toggle("active", which === "rooms");
-  $("tab-friends").classList.toggle("active", which === "friends");
-  $("tab-dms").classList.toggle("active", which === "dms");
-  $("room-list").classList.toggle("hidden", which !== "rooms");
-  $("friends-panel").classList.toggle("hidden", which !== "friends");
-  $("dms-panel").classList.toggle("hidden", which !== "dms");
-}
-
 function loadFriends() {
   friendListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
   friendListeners = [];
@@ -2783,6 +2779,18 @@ function initLobbyTabs() {
   $("tab-rooms").onclick = () => switchLobbyTab("rooms");
   $("tab-friends").onclick = () => switchLobbyTab("friends");
   $("tab-dms").onclick = () => switchLobbyTab("dms");
+  $("tab-voice").onclick = () => switchLobbyTab("voice");
+}
+
+function switchLobbyTab(which) {
+  $("tab-rooms").classList.toggle("active", which === "rooms");
+  $("tab-friends").classList.toggle("active", which === "friends");
+  $("tab-dms").classList.toggle("active", which === "dms");
+  $("tab-voice").classList.toggle("active", which === "voice");
+  $("room-list").classList.toggle("hidden", which !== "rooms");
+  $("friends-panel").classList.toggle("hidden", which !== "friends");
+  $("dms-panel").classList.toggle("hidden", which !== "dms");
+  $("voice-panel").classList.toggle("hidden", which !== "voice");
 }
 
 function loadDmList() {
@@ -3062,7 +3070,40 @@ document.addEventListener("DOMContentLoaded", () => {
   initNotifications();
   initLobbyTabs();
   initDM();
+  initVoiceUI();
 });
+
+function initVoiceUI() {
+  initVoiceTab();
+  window.__toast = showToast;
+  window.__canCloseVoice = (roomId, createdBy) =>
+    !!currentUser && (createdBy === currentUser.uid || isAdmin);
+  window.__closeVoiceRoom = (roomId) => {
+    const name = document.getElementById("voice-room-name").textContent || "this voice room";
+    showConfirmModal(
+      `Close "${name}"?`,
+      `<p style="color:var(--text-secondary)">This removes the voice room for everyone. This can't be undone.</p>`,
+      "Delete Room",
+      async () => {
+        leaveVoiceRoom();
+        await remove(ref(db, `voiceRooms/${roomId}`));
+        await remove(ref(db, `voicePeers/${roomId}`)).catch(() => {});
+        await remove(ref(db, `voiceSignals/${roomId}`)).catch(() => {});
+        showToast("Voice room closed");
+      }
+    );
+  };
+  $("voice-back-btn").addEventListener("click", () => {
+    leaveVoiceRoom();
+    showScreen("lobby");
+  });
+  $("voice-leave-btn").addEventListener("click", () => {
+    leaveVoiceRoom();
+    showScreen("lobby");
+  });
+  $("voice-mute-btn").addEventListener("click", toggleMute);
+  $("voice-deafen-btn").addEventListener("click", toggleDeafen);
+}
 
 function initGamesUI() {
   initGames();

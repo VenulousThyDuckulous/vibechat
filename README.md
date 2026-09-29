@@ -30,6 +30,7 @@ A chill place to hang out and chat in real time.
 - 🔔 Browser notifications for mentions & announcements
 - 📌 Announcements tab (owner posts, everyone reads)
 - 🎮 Minigames with leaderboards
+- 🔊 Voice rooms (WebRTC mesh)
 - 🗑️ Mods can delete messages right from chat
 - 🌙 Dark mode built in
 - 🎨 Colour themes (including light mode)

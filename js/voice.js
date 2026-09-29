@@ -1,0 +1,489 @@
+// ============================================================
+//  VibeChat Voice — WebRTC mesh with Firebase RTDB signaling.
+//  Free STUN only (no TURN server), so symmetric-NAT users may fail.
+//  Best with ~6 or fewer people per room (mesh bandwidth).
+// ============================================================
+
+import { db, auth } from "./firebase-config.js";
+import {
+  ref,
+  push,
+  set,
+  get,
+  onValue,
+  onChildAdded,
+  onChildRemoved,
+  onChildChanged,
+  onDisconnect,
+  remove,
+  update,
+  serverTimestamp,
+  off
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const ICE_CONFIG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+const SPEAK_THRESHOLD = 18; // analyser RMS level that counts as talking
+
+let lobbyListeners = [];
+let lobbyStarted = false;
+let roomCache = {};
+
+// Active call state (null when not in a voice room)
+let call = null;
+
+function myUid() {
+  return auth.currentUser?.uid || null;
+}
+
+function myName() {
+  return localStorage.getItem("vibechat-username") || "user";
+}
+
+// ============ LOBBY (list + create) ============
+export function initVoiceTab() {
+  document.getElementById("create-voice-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("voice-room-name");
+    const name = input.value.trim();
+    if (!name || !myUid()) return;
+    const newRef = push(ref(db, "voiceRooms"));
+    await set(newRef, {
+      name,
+      createdBy: myUid(),
+      createdByName: myName(),
+      createdAt: serverTimestamp()
+    });
+    input.value = "";
+  });
+}
+
+export function startVoiceLobby() {
+  if (lobbyStarted || !myUid()) return;
+  lobbyStarted = true;
+  const roomsRef = ref(db, "voiceRooms");
+  const addedCb = (snap) => {
+    roomCache[snap.key] = snap.val();
+    renderVoiceRooms();
+  };
+  const removedCb = (snap) => {
+    delete roomCache[snap.key];
+    renderVoiceRooms();
+  };
+  const changedCb = (snap) => {
+    roomCache[snap.key] = snap.val();
+    renderVoiceRooms();
+  };
+  onChildAdded(roomsRef, addedCb);
+  onChildRemoved(roomsRef, removedCb);
+  onChildChanged(roomsRef, changedCb);
+  lobbyListeners.push(
+    { ref: roomsRef, event: "child_added", cb: addedCb },
+    { ref: roomsRef, event: "child_removed", cb: removedCb },
+    { ref: roomsRef, event: "child_changed", cb: changedCb }
+  );
+  // One lightweight listener gives live headcounts for every room
+  const peersRef = ref(db, "voicePeers");
+  const peersCb = () => renderVoiceRooms();
+  onValue(peersRef, peersCb);
+  lobbyListeners.push({ ref: peersRef, event: "value", cb: peersCb });
+}
+
+export function stopVoiceLobby() {
+  lobbyListeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  lobbyListeners = [];
+  lobbyStarted = false;
+  roomCache = {};
+}
+
+async function peerCounts() {
+  try {
+    const snap = await get(ref(db, "voicePeers"));
+    const counts = {};
+    for (const [roomId, peers] of Object.entries(snap.val() || {})) {
+      counts[roomId] = Object.keys(peers || {}).length;
+    }
+    return counts;
+  } catch (err) {
+    return {};
+  }
+}
+
+async function renderVoiceRooms() {
+  const box = document.getElementById("voice-room-list");
+  if (!box) return;
+  const counts = await peerCounts();
+  box.innerHTML = "";
+  const ids = Object.keys(roomCache);
+  if (!ids.length) {
+    box.innerHTML = '<p class="empty-state" style="padding:16px">No voice rooms — create one!</p>';
+    return;
+  }
+  ids.forEach(id => {
+    const data = roomCache[id];
+    const n = counts[id] || 0;
+    const card = document.createElement("div");
+    card.className = "room-card";
+    card.innerHTML = `
+      <div class="room-card-info">
+        <h4>${escapeHtml(data.name)}</h4>
+        <p>🔊 Voice · ${n} inside</p>
+      </div>
+      <span class="room-card-badge">🔊</span>
+    `;
+    card.addEventListener("click", () => joinVoiceRoom(id, data.name));
+    box.appendChild(card);
+  });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+// ============ CALL ============
+export function inVoiceCall() {
+  return !!call;
+}
+
+export async function joinVoiceRoom(roomId, roomName) {
+  if (call) leaveVoiceRoom();
+  const uid = myUid();
+  if (!uid) return;
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (err) {
+    console.error("Mic unavailable:", err);
+    const showToast = window.__toast || ((m) => alert(m));
+    showToast("Microphone blocked — allow mic access to join voice.");
+    return;
+  }
+
+  const joinedAt = Date.now();
+  call = {
+    roomId,
+    uid,
+    joinedAt,
+    stream,
+    peers: {}, // uid -> { pc, audio, analyser, data, tile, pending }
+    listeners: [],
+    muted: false,
+    deafened: false,
+    analyser: null,
+    raf: 0,
+    alive: true
+  };
+
+  document.getElementById("voice-room-name").textContent = roomName;
+  document.getElementById("voice-mute-btn").textContent = "🔊 Unmuted";
+  document.getElementById("voice-deafen-btn").textContent = "👂 Hearing";
+  document.getElementById("voice-tiles").innerHTML = "";
+  addTile(uid, myName(), true);
+  showVoiceScreen();
+  paintVoiceClose(roomId);
+
+  // Roster first so others see us even if signaling lags.
+  // Auto-removed if the tab crashes or the network drops.
+  await set(ref(db, `voicePeers/${roomId}/${uid}`), {
+    username: myName(),
+    muted: false,
+    joinedAt
+  });
+  onDisconnect(ref(db, `voicePeers/${roomId}/${uid}`)).remove().catch(() => {});
+
+  // Signals listener BEFORE sending offers (answers can come back fast)
+  const sigRef = ref(db, `voiceSignals/${roomId}/${uid}`);
+  const sigCb = (snap) => handleSignal(snap.key, snap.val());
+  onChildAdded(sigRef, sigCb);
+  call.listeners.push({ ref: sigRef, event: "child_added", cb: sigCb });
+
+  // Offer to everyone already here (they're older, so no glare)
+  try {
+    const snap = await get(ref(db, `voicePeers/${roomId}`));
+    for (const [peerUid, peer] of Object.entries(snap.val() || {})) {
+      if (peerUid === uid) continue;
+      if (shouldOfferTo(joinedAt, uid, peer.joinedAt || 0, peerUid)) {
+        await makeOffer(peerUid, peer.username || "user");
+      }
+    }
+  } catch (err) {
+    console.error("Roster read failed:", err);
+  }
+
+  // Roster changes: offer to genuine newcomers, drop leavers
+  const rosterRef = ref(db, `voicePeers/${roomId}`);
+  const rosterAdded = async (snap) => {
+    if (!call || snap.key === uid || call.peers[snap.key]) return;
+    const peer = snap.val() || {};
+    if (shouldOfferTo(joinedAt, uid, peer.joinedAt || 0, snap.key)) {
+      try { await makeOffer(snap.key, peer.username || "user"); }
+      catch (err) { console.error("Offer failed:", err); }
+    }
+  };
+  const rosterRemoved = (snap) => {
+    if (snap.key !== uid) destroyPeer(snap.key);
+  };
+  onChildAdded(rosterRef, rosterAdded);
+  onChildRemoved(rosterRef, rosterRemoved);
+  call.listeners.push(
+    { ref: rosterRef, event: "child_added", cb: rosterAdded },
+    { ref: rosterRef, event: "child_removed", cb: rosterRemoved }
+  );
+
+  // Bounce if the room itself is deleted
+  const roomRef = ref(db, `voiceRooms/${roomId}`);
+  const roomCb = (snap) => {
+    if (!snap.exists() && call && call.roomId === roomId) {
+      leaveVoiceRoom();
+      const showToast = window.__toast || (() => {});
+      showToast("Voice room was closed", "error");
+    }
+  };
+  onValue(roomRef, roomCb);
+  call.listeners.push({ ref: roomRef, event: "value", cb: roomCb });
+
+  // Speaking indicators
+  call.analyser = makeAnalyser(stream);
+  speakLoop();
+
+  // Creator/admins can close the room
+  paintVoiceClose(roomId);
+}
+
+// Newcomer offers; deterministic tie-break so both sides never offer at once
+function shouldOfferTo(myTs, myUid, theirTs, theirUid) {
+  if (myTs !== theirTs) return myTs > theirTs;
+  return myUid > theirUid;
+}
+
+async function makeOffer(peerUid, peerName) {
+  const pc = createPeer(peerUid, peerName);
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await push(ref(db, `voiceSignals/${call.roomId}/${peerUid}`), {
+    from: call.uid,
+    fromName: myName(),
+    type: "offer",
+    sdp: offer.sdp
+  });
+}
+
+function createPeer(peerUid, peerName) {
+  destroyPeer(peerUid);
+  const pc = new RTCPeerConnection(ICE_CONFIG);
+  for (const track of call.stream.getTracks()) pc.addTrack(track, call.stream);
+  const entry = { pc, audio: null, analyser: null, name: peerName, tile: null, pending: [] };
+  call.peers[peerUid] = entry;
+  entry.tile = addTile(peerUid, peerName, false);
+
+  pc.onicecandidate = (e) => {
+    if (e.candidate && call && call.alive) {
+      push(ref(db, `voiceSignals/${call.roomId}/${peerUid}`), {
+        from: call.uid,
+        fromName: myName(),
+        type: "candidate",
+        candidate: e.candidate.toJSON()
+      }).catch(() => {});
+    }
+  };
+  pc.ontrack = (e) => {
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
+    audio.srcObject = e.streams[0];
+    document.getElementById("voice-tiles").appendChild(audio);
+    entry.audio = audio;
+    entry.analyser = makeAnalyser(e.streams[0]);
+    applyDeafen();
+  };
+  pc.onconnectionstatechange = () => {
+    if (["failed", "closed"].includes(pc.connectionState)) destroyPeer(peerUid);
+  };
+  return pc;
+}
+
+async function handleSignal(sid, sig) {
+  if (!call || !call.alive || !sig) return;
+  const from = sig.from;
+  // Delete first so redeliveries can't double-handle
+  remove(ref(db, `voiceSignals/${call.roomId}/${call.uid}/${sid}`)).catch(() => {});
+  try {
+    if (sig.type === "offer") {
+      const pc = createPeer(from, sig.fromName || "user");
+      await pc.setRemoteDescription({ type: "offer", sdp: sig.sdp });
+      for (const track of call.stream.getTracks()) {
+        try { pc.addTrack(track, call.stream); } catch (e) { /* track already added */ }
+      }
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await push(ref(db, `voiceSignals/${call.roomId}/${from}`), {
+        from: call.uid,
+        fromName: myName(),
+        type: "answer",
+        sdp: answer.sdp
+      });
+      flushPending(from);
+    } else if (sig.type === "answer") {
+      const entry = call.peers[from];
+      if (entry && entry.pc.signalingState !== "stable") {
+        await entry.pc.setRemoteDescription({ type: "answer", sdp: sig.sdp });
+        flushPending(from);
+      }
+    } else if (sig.type === "candidate") {
+      const entry = call.peers[from];
+      if (!entry) return;
+      const cand = new RTCIceCandidate(sig.candidate);
+      if (entry.pc.remoteDescription) await entry.pc.addIceCandidate(cand);
+      else entry.pending.push(cand);
+    }
+  } catch (err) {
+    console.error("Signal handling failed:", err);
+  }
+}
+
+async function flushPending(peerUid) {
+  const entry = call?.peers[peerUid];
+  if (!entry) return;
+  for (const cand of entry.pending.splice(0)) {
+    try { await entry.pc.addIceCandidate(cand); } catch (e) { /* stale */ }
+  }
+}
+
+function destroyPeer(peerUid) {
+  if (!call) return;
+  const entry = call.peers[peerUid];
+  if (!entry) return;
+  try { entry.pc.close(); } catch (e) {}
+  if (entry.audio) entry.audio.remove();
+  if (entry.tile) entry.tile.remove();
+  delete call.peers[peerUid];
+}
+
+// ============ UI ============
+function showVoiceScreen() {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById("voice-screen").classList.add("active");
+}
+
+function paintVoiceClose(roomId) {
+  // Visibility + action provided by app.js (it knows admin status)
+  const btn = document.getElementById("voice-close-btn");
+  const createdBy = roomCache[roomId]?.createdBy;
+  const can = window.__canCloseVoice ? window.__canCloseVoice(roomId, createdBy) : false;
+  btn.classList.toggle("hidden", !can);
+  btn.onclick = () => window.__closeVoiceRoom && window.__closeVoiceRoom(roomId);
+}
+
+function addTile(uid, name, isSelf) {
+  const tiles = document.getElementById("voice-tiles");
+  const old = tiles.querySelector(`[data-voice-uid="${uid}"]`);
+  if (old) old.remove();
+  const tile = document.createElement("div");
+  tile.className = "voice-tile";
+  tile.dataset.voiceUid = uid;
+  tile.innerHTML = `
+    <span class="avatar"><span class="avatar-initial">${escapeHtml((name || "?").trim().charAt(0).toUpperCase())}</span></span>
+    <span class="voice-name">${escapeHtml(name)}${isSelf ? " (you)" : ""}</span>
+    <span class="voice-state"></span>
+  `;
+  tiles.appendChild(tile);
+  const entry = call?.peers[uid];
+  if (entry) entry.tile = tile;
+  return tile;
+}
+
+function makeAnalyser(stream) {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    const ctx = new Ctx();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser);
+    return { ctx, analyser };
+  } catch (err) {
+    return null;
+  }
+}
+
+function levelOf(a) {
+  if (!a) return 0;
+  const buf = new Uint8Array(a.analyser.fftSize);
+  a.analyser.getByteTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const v = (buf[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / buf.length) * 100;
+}
+
+function speakLoop() {
+  if (!call || !call.alive) return;
+  const tiles = document.getElementById("voice-tiles");
+  const selfTile = tiles.querySelector(`[data-voice-uid="${call.uid}"]`);
+  if (selfTile) selfTile.classList.toggle("speaking", !call.muted && !call.deafened && levelOf(call.analyser) > SPEAK_THRESHOLD);
+  for (const [uid, entry] of Object.entries(call.peers)) {
+    const tile = entry.tile || tiles.querySelector(`[data-voice-uid="${uid}"]`);
+    if (tile) tile.classList.toggle("speaking", levelOf(entry.analyser) > SPEAK_THRESHOLD);
+  }
+  call.raf = requestAnimationFrame(speakLoop);
+}
+
+function applyDeafen() {
+  if (!call) return;
+  const tiles = document.getElementById("voice-tiles");
+  for (const entry of Object.values(call.peers)) {
+    if (entry.audio) entry.audio.muted = call.deafened;
+  }
+  void tiles;
+}
+
+function refreshControls() {
+  if (!call) return;
+  document.getElementById("voice-mute-btn").textContent = call.muted || call.deafened ? "🔇 Muted" : "🔊 Unmuted";
+  document.getElementById("voice-deafen-btn").textContent = call.deafened ? "🔇 Deafened" : "👂 Hearing";
+}
+
+export function toggleMute() {
+  if (!call) return;
+  call.muted = !call.muted;
+  applyMicState();
+}
+
+export function toggleDeafen() {
+  if (!call) return;
+  call.deafened = !call.deafened;
+  if (call.deafened) call.muted = true;
+  applyMicState();
+  applyDeafen();
+}
+
+function applyMicState() {
+  if (!call) return;
+  const off = call.muted || call.deafened;
+  for (const track of call.stream.getTracks()) track.enabled = !off;
+  update(ref(db, `voicePeers/${call.roomId}/${call.uid}`), { muted: off }).catch(() => {});
+  refreshControls();
+  const tiles = document.getElementById("voice-tiles");
+  const selfTile = tiles.querySelector(`[data-voice-uid="${call.uid}"]`);
+  if (selfTile) selfTile.querySelector(".voice-state").textContent = off ? "🔇" : "";
+}
+
+export function leaveVoiceRoom() {
+  if (!call) return;
+  const { roomId, uid, stream, listeners } = call;
+  call.alive = false;
+  cancelAnimationFrame(call.raf);
+  listeners.forEach(({ ref: r, event, cb }) => { try { off(r, event, cb); } catch (e) {} });
+  for (const peerUid of Object.keys(call.peers)) destroyPeer(peerUid);
+  try {
+    for (const track of stream.getTracks()) track.stop();
+  } catch (e) {}
+  remove(ref(db, `voicePeers/${roomId}/${uid}`)).catch(() => {});
+  remove(ref(db, `voiceSignals/${roomId}/${uid}`)).catch(() => {});
+  call = null;
+  document.getElementById("voice-tiles").innerHTML = "";
+}

@@ -79,6 +79,7 @@
             <button id="tab-rooms" class="lobby-tab active">Rooms</button>
             <button id="tab-friends" class="lobby-tab">Friends <span id="friends-badge" class="tab-badge hidden"></span></button>
             <button id="tab-dms" class="lobby-tab">DMs <span id="dms-badge" class="tab-badge hidden"></span></button>
+            <button id="tab-voice" class="lobby-tab">Voice</button>
           </div>
           <div id="room-list" class="room-list">
             <p class="empty-state">No rooms yet — create one!</p>
@@ -98,6 +99,16 @@
               <h3>Messages</h3>
               <div id="dm-list"></div>
             </div>
+          </div>
+          <div id="voice-panel" class="hidden">
+            <div class="friends-section">
+              <h3>Voice rooms</h3>
+              <div id="voice-room-list"></div>
+            </div>
+            <form id="create-voice-form" class="create-room-form">
+              <input type="text" id="voice-room-name" placeholder="New voice room" maxlength="40" />
+              <button type="submit" class="btn btn-primary">Create</button>
+            </form>
           </div>
         </div>
 
@@ -207,6 +218,24 @@
           <button type="submit" id="dm-send" class="btn btn-primary">Send</button>
         </form>
       </div>
+    </div>
+  </div>
+
+  <!-- ============ VOICE ROOM ============ -->
+  <div id="voice-screen" class="screen">
+    <div class="voice-container">
+      <header class="voice-header">
+        <button id="voice-back-btn" class="btn btn-ghost">← Lobby</button>
+        <h3 id="voice-room-name"></h3>
+        <button id="voice-close-btn" class="btn btn-danger btn-small hidden">Close</button>
+      </header>
+      <div id="voice-tiles" class="voice-tiles"></div>
+      <div class="voice-controls">
+        <button id="voice-mute-btn" class="btn btn-ghost">🔊 Unmuted</button>
+        <button id="voice-deafen-btn" class="btn btn-ghost">👂 Hearing</button>
+        <button id="voice-leave-btn" class="btn btn-danger">Leave</button>
+      </div>
+      <p class="voice-hint">Mesh voice — best with 6 or fewer people. No TURN server, so some strict networks can't connect.</p>
     </div>
   </div>
 
