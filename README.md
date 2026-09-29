@@ -30,6 +30,7 @@ A chill place to hang out and chat in real time.
 - 🔔 Browser notifications for mentions & announcements
 - 📌 Announcements tab (owner posts, everyone reads)
 - 🎮 Minigames with leaderboards
+- 🕹️ GBA emulator (bring your own ROM)
 - 🔊 Voice rooms (WebRTC mesh + screen share)
 - 🗑️ Mods can delete messages right from chat
 - 🌙 Dark mode built in

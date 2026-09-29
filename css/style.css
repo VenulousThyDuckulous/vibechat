@@ -1718,6 +1718,59 @@ input::placeholder {
   cursor: default;
 }
 
+/* ============ GBA EMULATOR ============ */
+.emu-picker {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.emu-picker h4 {
+  font-size: 1.1rem;
+}
+
+.emu-picker p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.emu-picker input[type="file"] {
+  width: 100%;
+}
+
+.emu-or {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+#emu-holder {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#emu-holder #emu-game {
+  min-height: 320px;
+}
+
+.emu-rom {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 button {
   touch-action: manipulation;
 }

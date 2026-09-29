@@ -766,10 +766,110 @@ function createMemory(stage, api) {
   };
 }
 
+// ============ GBA EMULATOR (EmulatorJS) ============
+// ROMs are user-supplied (upload or URL) — nothing copyrighted ships
+// with the app. No BIOS file needed (built-in replacement).
+let gbaRomUrl = null;
+
+function gbaEsc(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+function createGba(stage, api) {
+  let alive = true;
+
+  const picker = document.createElement("div");
+  picker.className = "emu-picker";
+  picker.innerHTML = `
+    <h4>🕹️ Game Boy Advance</h4>
+    <p>Load a ROM dump you own (homebrew works great). The file never leaves your browser.</p>
+    <input type="file" id="emu-file" accept=".gba,.zip" />
+    <div class="emu-or">— or paste a direct ROM link —</div>
+    <input type="text" id="emu-url" placeholder="https://…/game.gba" autocomplete="off" />
+    <button id="emu-url-btn" class="btn btn-primary">Load URL</button>
+  `;
+  stage.appendChild(picker);
+
+  function showPicker() {
+    stage.querySelector("#emu-holder")?.remove();
+    picker.classList.remove("hidden");
+    picker.style.display = "";
+  }
+
+  function startEmu(romUrl, label) {
+    if (!alive) return;
+    stage.querySelector("#emu-holder")?.remove();
+    document.querySelector('script[data-emu-loader]')?.remove();
+    try { window.EJS_emulator?.pause?.(); } catch (e) { /* not running */ }
+    if (gbaRomUrl && gbaRomUrl.startsWith("blob:")) {
+      try { URL.revokeObjectURL(gbaRomUrl); } catch (e) {}
+    }
+    gbaRomUrl = romUrl.startsWith("blob:") ? romUrl : null;
+
+    picker.style.display = "none";
+    const holder = document.createElement("div");
+    holder.id = "emu-holder";
+    holder.innerHTML = `
+      <div id="emu-game"></div>
+      <p class="emu-rom">Playing: ${gbaEsc(label)}</p>
+      <button id="emu-change" class="btn btn-ghost">Change ROM</button>
+    `;
+    stage.appendChild(holder);
+    holder.querySelector("#emu-change").addEventListener("click", showPicker);
+
+    window.EJS_player = "#emu-game";
+    window.EJS_gameUrl = romUrl;
+    window.EJS_core = "gba";
+    window.EJS_biosUrl = "";
+    const s = document.createElement("script");
+    s.src = "https://www.emulatorjs.com/loader.js";
+    s.dataset.emuLoader = "1";
+    s.onerror = () => {
+      const grid = holder.querySelector("#emu-game");
+      if (grid) grid.innerHTML = '<p class="gif-status">Could not load the emulator. Check your connection and try again.</p>';
+    };
+    document.body.appendChild(s);
+  }
+
+  picker.querySelector("#emu-file").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    startEmu(URL.createObjectURL(file), file.name);
+  });
+  const loadUrl = () => {
+    const url = picker.querySelector("#emu-url").value.trim();
+    if (!url) return;
+    const label = url.split("/").pop().split("?")[0] || url;
+    startEmu(url, label);
+  };
+  picker.querySelector("#emu-url-btn").addEventListener("click", loadUrl);
+  picker.querySelector("#emu-url").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      loadUrl();
+    }
+  });
+
+  return {
+    destroy() {
+      alive = false;
+      try { window.EJS_emulator?.pause?.(); } catch (e) { /* not running */ }
+      if (gbaRomUrl && gbaRomUrl.startsWith("blob:")) {
+        try { URL.revokeObjectURL(gbaRomUrl); } catch (e) {}
+        gbaRomUrl = null;
+      }
+    }
+  };
+}
+
 const GAMES = {
   wave: { name: "Wave", icon: "🌊", create: createWave },
   flappy: { name: "Flappy Bird", icon: "🐤", create: createFlappy },
   snake: { name: "Snake", icon: "🐍", create: createSnake },
   breakout: { name: "Breakout", icon: "🧱", create: createBreakout },
-  memory: { name: "Memory Match", icon: "🃏", create: createMemory }
+  memory: { name: "Memory Match", icon: "🃏", create: createMemory },
+  gba: { name: "GBA Emulator", icon: "🕹️", create: createGba }
 };
