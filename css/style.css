@@ -592,6 +592,14 @@ input::placeholder {
   text-overflow: ellipsis;
 }
 
+.voice-tile .voice-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
 .voice-tile .voice-state {
   font-size: 0.8rem;
   color: var(--text-secondary);

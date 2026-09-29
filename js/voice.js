@@ -187,9 +187,11 @@ function paintTileContent(tile, uid, fallbackName, isSelf) {
   const plate = np?.text ? `<span class="plate plate-${np.theme || "classic"}">${escapeHtml(np.text.slice(0, 16))}</span>` : "";
   const frame = p.equippedFrame ? ` frame-${p.equippedFrame}` : "";
   const prevState = tile.querySelector(".voice-state")?.textContent || "";
+  const tags = `${badges}${badges && plate ? " " : ""}${plate}`;
   tile.innerHTML = `
     <span class="avatar${frame}" data-voice-avatar="${escapeHtml(uid)}">${avatar}</span>
-    <span class="voice-name">${escapeHtml(display)}${isSelf ? " (you)" : ""} ${badges} ${plate}</span>
+    <span class="voice-name">${escapeHtml(display)}${isSelf ? " (you)" : ""}</span>
+    ${tags ? `<span class="voice-tags">${tags}</span>` : ""}
     <span class="voice-state">${escapeHtml(prevState)}</span>
   `;
 }
