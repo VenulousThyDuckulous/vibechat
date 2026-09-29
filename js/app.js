@@ -4,7 +4,7 @@
 
 import { auth, db, ADMIN_UIDS, OWNER_USERNAMES, VAPID_KEY, GIPHY_API_KEY } from "./firebase-config.js";
 import { initGames, closeGame } from "./games.js";
-import { initVoiceTab, startVoiceLobby, stopVoiceLobby, leaveVoiceRoom, toggleMute, toggleDeafen } from "./voice.js";
+import { initVoiceTab, startVoiceLobby, stopVoiceLobby, leaveVoiceRoom, toggleMute, toggleDeafen, toggleShare } from "./voice.js";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -3103,6 +3103,7 @@ function initVoiceUI() {
   });
   $("voice-mute-btn").addEventListener("click", toggleMute);
   $("voice-deafen-btn").addEventListener("click", toggleDeafen);
+  $("voice-share-btn").addEventListener("click", toggleShare);
 }
 
 function initGamesUI() {

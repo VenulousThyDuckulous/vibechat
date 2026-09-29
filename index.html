@@ -229,10 +229,15 @@
         <h3 id="voice-room-name"></h3>
         <button id="voice-close-btn" class="btn btn-danger btn-small hidden">Close</button>
       </header>
+      <div id="voice-stage" class="voice-stage hidden">
+        <div id="voice-stage-label" class="voice-stage-label"></div>
+        <video id="voice-stage-video" autoplay playsinline muted></video>
+      </div>
       <div id="voice-tiles" class="voice-tiles"></div>
       <div class="voice-controls">
         <button id="voice-mute-btn" class="btn btn-ghost">🔊 Unmuted</button>
         <button id="voice-deafen-btn" class="btn btn-ghost">👂 Hearing</button>
+        <button id="voice-share-btn" class="btn btn-ghost">🖥️ Share</button>
         <button id="voice-leave-btn" class="btn btn-danger">Leave</button>
       </div>
       <p class="voice-hint">Mesh voice — best with 6 or fewer people. No TURN server, so some strict networks can't connect.</p>

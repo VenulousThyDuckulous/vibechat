@@ -537,6 +537,29 @@ input::placeholder {
   align-content: start;
 }
 
+/* ============ SCREEN SHARE STAGE ============ */
+.voice-stage {
+  padding: 12px 24px 0;
+}
+
+.voice-stage.hidden {
+  display: none;
+}
+
+.voice-stage-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+#voice-stage-video {
+  width: 100%;
+  max-height: 46vh;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
 .voice-tile {
   display: flex;
   flex-direction: column;

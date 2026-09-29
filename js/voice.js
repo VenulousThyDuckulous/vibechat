@@ -167,11 +167,15 @@ export async function joinVoiceRoom(roomId, roomName) {
     uid,
     joinedAt,
     stream,
-    peers: {}, // uid -> { pc, audio, analyser, data, tile, pending }
+    peers: {}, // uid -> { pc, audio, analyser, screenStream, name, tile, pending }
+    roster: {}, // uid -> roster data (username, muted, sharing, joinedAt)
     listeners: [],
     muted: false,
     deafened: false,
     analyser: null,
+    screenStream: null,
+    screenTrack: null,
+    stageUid: null,
     raf: 0,
     alive: true
   };
@@ -180,6 +184,7 @@ export async function joinVoiceRoom(roomId, roomName) {
   document.getElementById("voice-mute-btn").textContent = "🔊 Unmuted";
   document.getElementById("voice-deafen-btn").textContent = "👂 Hearing";
   document.getElementById("voice-tiles").innerHTML = "";
+  paintShareBtn();
   addTile(uid, myName(), true);
   showVoiceScreen();
   paintVoiceClose(roomId);
@@ -189,6 +194,7 @@ export async function joinVoiceRoom(roomId, roomName) {
   await set(ref(db, `voicePeers/${roomId}/${uid}`), {
     username: myName(),
     muted: false,
+    sharing: false,
     joinedAt
   });
   onDisconnect(ref(db, `voicePeers/${roomId}/${uid}`)).remove().catch(() => {});
@@ -204,6 +210,7 @@ export async function joinVoiceRoom(roomId, roomName) {
     const snap = await get(ref(db, `voicePeers/${roomId}`));
     for (const [peerUid, peer] of Object.entries(snap.val() || {})) {
       if (peerUid === uid) continue;
+      call.roster[peerUid] = peer;
       if (shouldOfferTo(joinedAt, uid, peer.joinedAt || 0, peerUid)) {
         await makeOffer(peerUid, peer.username || "user");
       }
@@ -212,24 +219,41 @@ export async function joinVoiceRoom(roomId, roomName) {
     console.error("Roster read failed:", err);
   }
 
-  // Roster changes: offer to genuine newcomers, drop leavers
+  // Roster changes: offer to genuine newcomers, drop leavers, track state
   const rosterRef = ref(db, `voicePeers/${roomId}`);
   const rosterAdded = async (snap) => {
     if (!call || snap.key === uid || call.peers[snap.key]) return;
     const peer = snap.val() || {};
+    call.roster[snap.key] = peer;
     if (shouldOfferTo(joinedAt, uid, peer.joinedAt || 0, snap.key)) {
       try { await makeOffer(snap.key, peer.username || "user"); }
       catch (err) { console.error("Offer failed:", err); }
     }
   };
   const rosterRemoved = (snap) => {
+    if (call) delete call.roster[snap.key];
     if (snap.key !== uid) destroyPeer(snap.key);
+  };
+  const rosterChanged = (snap) => {
+    if (!call || snap.key === uid) return;
+    const peer = snap.val() || {};
+    call.roster[snap.key] = peer;
+    const entry = call.peers[snap.key];
+    if (entry?.tile) {
+      const nameEl = entry.tile.querySelector(".voice-name");
+      if (nameEl) nameEl.textContent = peer.username || entry.name;
+      const stateEl = entry.tile.querySelector(".voice-state");
+      if (stateEl) stateEl.textContent = peer.muted ? "🔇" : (peer.sharing ? "🖥️ sharing" : "");
+    }
+    refreshStage();
   };
   onChildAdded(rosterRef, rosterAdded);
   onChildRemoved(rosterRef, rosterRemoved);
+  onChildChanged(rosterRef, rosterChanged);
   call.listeners.push(
     { ref: rosterRef, event: "child_added", cb: rosterAdded },
-    { ref: rosterRef, event: "child_removed", cb: rosterRemoved }
+    { ref: rosterRef, event: "child_removed", cb: rosterRemoved },
+    { ref: rosterRef, event: "child_changed", cb: rosterChanged }
   );
 
   // Bounce if the room itself is deleted
@@ -289,6 +313,16 @@ function createPeer(peerUid, peerName) {
     }
   };
   pc.ontrack = (e) => {
+    const track = e.track;
+    if (track && track.kind === "video") {
+      // Screen share stream — show it on the stage
+      entry.screenStream = e.streams[0] || null;
+      track.onmute = () => refreshStage();
+      track.onunmute = () => refreshStage();
+      track.onended = () => refreshStage();
+      refreshStage();
+      return;
+    }
     const audio = document.createElement("audio");
     audio.autoplay = true;
     audio.srcObject = e.streams[0];
@@ -310,10 +344,20 @@ async function handleSignal(sid, sig) {
   remove(ref(db, `voiceSignals/${call.roomId}/${call.uid}/${sid}`)).catch(() => {});
   try {
     if (sig.type === "offer") {
-      const pc = createPeer(from, sig.fromName || "user");
+      // Reuse the live connection when this is a renegotiation (screen share),
+      // otherwise build a fresh peer connection.
+      let entry = call.peers[from];
+      let pc;
+      if (entry && entry.pc.signalingState !== "closed") {
+        pc = entry.pc;
+        entry.name = sig.fromName || entry.name;
+      } else {
+        pc = createPeer(from, sig.fromName || "user");
+        entry = call.peers[from];
+      }
       await pc.setRemoteDescription({ type: "offer", sdp: sig.sdp });
-      for (const track of call.stream.getTracks()) {
-        try { pc.addTrack(track, call.stream); } catch (e) { /* track already added */ }
+      if (!pc.getSenders().some(s => s.track && s.track.kind === "audio")) {
+        for (const track of call.stream.getTracks()) pc.addTrack(track, call.stream);
       }
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -358,6 +402,133 @@ function destroyPeer(peerUid) {
   if (entry.audio) entry.audio.remove();
   if (entry.tile) entry.tile.remove();
   delete call.peers[peerUid];
+  delete call.roster[peerUid];
+  if (call.stageUid === peerUid) refreshStage();
+}
+
+// ============ SCREEN SHARING ============
+async function renegotiate(peerUid) {
+  const entry = call?.peers[peerUid];
+  if (!entry || !call.alive) return;
+  if (entry.pc.signalingState !== "stable") {
+    setTimeout(() => {
+      if (call?.alive) renegotiate(peerUid).catch(() => {});
+    }, 600);
+    return;
+  }
+  try {
+    const offer = await entry.pc.createOffer();
+    await entry.pc.setLocalDescription(offer);
+    await push(ref(db, `voiceSignals/${call.roomId}/${peerUid}`), {
+      from: call.uid,
+      fromName: myName(),
+      type: "offer",
+      sdp: offer.sdp
+    });
+  } catch (err) {
+    console.error("Renegotiation failed:", err);
+  }
+}
+
+function paintShareBtn() {
+  const btn = document.getElementById("voice-share-btn");
+  if (btn) btn.textContent = call?.screenTrack ? "⏹️ Sharing" : "🖥️ Share";
+}
+
+export async function toggleShare() {
+  if (!call || !call.alive) return;
+  if (call.screenTrack) {
+    stopShare();
+    return;
+  }
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    const showToast = window.__toast || (() => {});
+    showToast("Screen sharing isn't supported in this browser.", "error");
+    return;
+  }
+  let screen;
+  try {
+    screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+  } catch (err) {
+    return; // user cancelled the picker
+  }
+  if (!call || !call.alive) {
+    try { screen.getTracks().forEach(t => t.stop()); } catch (e) {}
+    return;
+  }
+  const track = screen.getVideoTracks()[0];
+  if (!track) {
+    try { screen.getTracks().forEach(t => t.stop()); } catch (e) {}
+    return;
+  }
+  call.screenStream = screen;
+  call.screenTrack = track;
+  track.onended = () => {
+    if (call?.screenTrack === track) stopShare();
+  };
+  for (const peerUid of Object.keys(call.peers)) {
+    try {
+      call.peers[peerUid].pc.addTrack(track, screen);
+    } catch (err) {
+      console.error("Share addTrack failed:", err);
+    }
+  }
+  update(ref(db, `voicePeers/${call.roomId}/${call.uid}`), { sharing: true }).catch(() => {});
+  for (const peerUid of Object.keys(call.peers)) renegotiate(peerUid).catch(() => {});
+  refreshStage();
+  paintShareBtn();
+}
+
+function stopShare() {
+  if (!call) return;
+  const track = call.screenTrack;
+  call.screenTrack = null;
+  if (call.screenStream) {
+    try { call.screenStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    call.screenStream = null;
+  }
+  if (track) {
+    for (const peerUid of Object.keys(call.peers)) {
+      const entry = call.peers[peerUid];
+      try {
+        const sender = entry.pc.getSenders().find(s => s.track === track);
+        if (sender) entry.pc.removeTrack(sender);
+      } catch (e) { /* already gone */ }
+      renegotiate(peerUid).catch(() => {});
+    }
+  }
+  update(ref(db, `voicePeers/${call.roomId}/${call.uid}`), { sharing: false }).catch(() => {});
+  refreshStage();
+  paintShareBtn();
+}
+
+// Stage shows my screen first, otherwise the latest sharing peer
+function refreshStage() {
+  const stage = document.getElementById("voice-stage");
+  const video = document.getElementById("voice-stage-video");
+  const label = document.getElementById("voice-stage-label");
+  if (!call || !call.alive || !stage || !video) return;
+  if (call.screenTrack && call.screenStream) {
+    if (video.srcObject !== call.screenStream) video.srcObject = call.screenStream;
+    if (label) label.textContent = `${myName()} (you)`;
+    stage.classList.remove("hidden");
+    call.stageUid = call.uid;
+    return;
+  }
+  let pick = null;
+  for (const [peerUid, entry] of Object.entries(call.peers)) {
+    if (call.roster[peerUid]?.sharing && entry.screenStream) pick = { uid: peerUid, entry };
+  }
+  if (pick) {
+    if (video.srcObject !== pick.entry.screenStream) video.srcObject = pick.entry.screenStream;
+    if (label) label.textContent = pick.entry.name || "Someone";
+    stage.classList.remove("hidden");
+    call.stageUid = pick.uid;
+  } else {
+    video.srcObject = null;
+    stage.classList.add("hidden");
+    call.stageUid = null;
+  }
 }
 
 // ============ UI ============
@@ -482,8 +653,16 @@ export function leaveVoiceRoom() {
   try {
     for (const track of stream.getTracks()) track.stop();
   } catch (e) {}
+  try {
+    if (call.screenStream) call.screenStream.getTracks().forEach(t => t.stop());
+  } catch (e) {}
   remove(ref(db, `voicePeers/${roomId}/${uid}`)).catch(() => {});
   remove(ref(db, `voiceSignals/${roomId}/${uid}`)).catch(() => {});
   call = null;
   document.getElementById("voice-tiles").innerHTML = "";
+  const stage = document.getElementById("voice-stage");
+  if (stage) stage.classList.add("hidden");
+  const video = document.getElementById("voice-stage-video");
+  if (video) video.srcObject = null;
+  paintShareBtn();
 }
