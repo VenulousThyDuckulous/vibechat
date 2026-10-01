@@ -827,30 +827,6 @@ input::placeholder {
   font-size: 0.75rem;
 }
 
-/* ============ DAY DIVIDERS ============ */
-.day-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 8px 0;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-}
-
-.day-divider::before,
-.day-divider::after {
-  content: "";
-  flex: 1;
-  border-top: 1px solid var(--border);
-}
-
-.day-divider span {
-  padding: 2px 12px;
-  background: var(--bg-tertiary);
-  border-radius: 12px;
-  white-space: nowrap;
-}
-
 .message-bubble {
   padding: 10px 14px;
   border-radius: var(--radius);

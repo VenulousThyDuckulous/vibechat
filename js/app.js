@@ -329,11 +329,6 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function dayKey(ts) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
 function dayLabel(ts) {
   const now = new Date();
   const d = new Date(ts);
@@ -349,18 +344,12 @@ function dayLabel(ts) {
   });
 }
 
-// Date divider between messages from different days ("Today" for the
-// first message even on a fresh load — no reset bookkeeping needed).
-function maybeInsertDayDivider(container, ts) {
-  const time = Number(ts) || Date.now();
-  const key = dayKey(time);
-  const lastDay = container.querySelector(".message") ? container.dataset.lastDay : null;
-  if (lastDay === key) return;
-  container.dataset.lastDay = key;
-  const div = document.createElement("div");
-  div.className = "day-divider";
-  div.innerHTML = `<span>${dayLabel(time)}</span>`;
-  container.appendChild(div);
+// Full header stamp: time alone today, "Yesterday · 02:33 PM" style otherwise
+function formatFullTime(ts) {
+  if (!ts) return "";
+  const label = dayLabel(Number(ts) || Date.now());
+  const time = formatTime(ts);
+  return label === "Today" ? time : `${label} · ${time}`;
 }
 
 function escapeHtml(str) {
@@ -1191,7 +1180,6 @@ function loadMessages(roomId) {
 
 function appendMessage(msgId, msg) {
   const container = $("messages");
-  maybeInsertDayDivider(container, msg.timestamp);
   const isOwn = msg.uid === currentUser.uid;
   const div = document.createElement("div");
   div.className = `message ${isOwn ? "own" : "other"}`;
@@ -1205,7 +1193,7 @@ function appendMessage(msgId, msg) {
       <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
       <span class="message-username">${escapeHtml(msg.username)}</span>
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""} ${plateHtml(msg.uid)}
-      <span class="message-time">${formatTime(msg.timestamp)}</span>
+      <span class="message-time">${formatFullTime(msg.timestamp)}</span>
     </div>
     <div class="message-bubble">${msg.replyTo ? `<div class="reply-quote" data-goto="${escapeHtml(msg.replyTo.msgId)}"><span class="reply-author">@${escapeHtml(msg.replyTo.username)}</span><span>${escapeHtml((msg.replyTo.text || "").slice(0, 120))}</span></div>` : ""}${renderMessageText(msg.text, isOwnerName(msg.username))}${msg.imageUrl ? `<a href="${escapeHtml(msg.imageUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(msg.imageUrl)}" class="message-image" loading="lazy" alt="shared image" /></a>` : ""}${msg.fileUrl ? `<a href="${escapeHtml(msg.fileUrl)}" target="_blank" rel="noopener" download="${escapeHtml(msg.fileName || "file")}" class="file-link">📎 ${escapeHtml(msg.fileName || "Download file")}</a>` : ""}</div>
   `;
@@ -2341,7 +2329,6 @@ function closeAnnouncements() {
 function appendAnnouncement(msgId, msg) {
   const container = $("ann-messages");
   if (!msg || container.querySelector(`[data-msg-id="${msgId}"]`)) return;
-  maybeInsertDayDivider(container, msg.timestamp);
   const div = document.createElement("div");
   div.className = "message other";
   div.dataset.msgId = msgId;
@@ -2352,7 +2339,7 @@ function appendAnnouncement(msgId, msg) {
       <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
       <span class="message-username">${escapeHtml(msg.username)}</span>
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""} ${plateHtml(msg.uid)}
-      <span class="message-time">${formatTime(msg.timestamp)}</span>
+      <span class="message-time">${formatFullTime(msg.timestamp)}</span>
     </div>
     <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}</div>
   `;
@@ -2933,7 +2920,6 @@ function appendDmMessage(msgId, msg) {
   if (!msg) return;
   const container = $("dm-messages");
   if (container.querySelector(`[data-msg-id="${msgId}"]`)) return;
-  maybeInsertDayDivider(container, msg.timestamp);
   const isOwn = msg.uid === currentUser.uid;
   const div = document.createElement("div");
   div.className = `message ${isOwn ? "own" : "other"}`;
@@ -2945,7 +2931,7 @@ function appendDmMessage(msgId, msg) {
       <span class="avatar" data-uid="${escapeHtml(msg.uid)}" data-name="${escapeHtml(msg.username)}">${avatarInner(msg.username, (userCache[msg.uid] || {}).photoURL)}</span>
       <span class="message-username">${escapeHtml(msg.username)}</span>
       ${isMsgAdmin ? '<span class="message-admin-badge">ADMIN</span>' : isMsgOwner ? '<span class="message-admin-badge">OWNER</span>' : ""} ${plateHtml(msg.uid)}
-      <span class="message-time">${formatTime(msg.timestamp)}</span>
+      <span class="message-time">${formatFullTime(msg.timestamp)}</span>
     </div>
     <div class="message-bubble">${renderMessageText(msg.text, isOwnerName(msg.username))}</div>
   `;
