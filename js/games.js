@@ -517,7 +517,12 @@ function createSnake(stage, api) {
 
   reset();
   alive = true;
-  c.addEventListener("pointerdown", () => setDir({ x: 1, y: 0 }));
+  // Tap starts/restarts, but must NOT queue a direction mid-game —
+  // pointerdown fires before touchend, so an unguarded handler would turn
+  // right first and eat the actual swipe (anti-reverse then locks it in).
+  c.addEventListener("pointerdown", () => {
+    if (state !== "play") setDir({ x: 1, y: 0 });
+  });
   c.addEventListener("touchstart", onTouchStart, { passive: true });
   c.addEventListener("touchend", onTouchEnd);
   window.addEventListener("keydown", onKey);
@@ -976,6 +981,471 @@ function createGba(stage, api) {
       alive = false;
       killEmu();
       gbaForgetCached();
+    }
+  };
+}
+
+// ============ TETRIS ============
+const TETRIS_PIECES = [
+  { m: [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]], c: "#00f0f0" },
+  { m: [[1, 0, 0], [1, 1, 1], [0, 0, 0]], c: "#0000f0" },
+  { m: [[0, 0, 1], [1, 1, 1], [0, 0, 0]], c: "#f0a000" },
+  { m: [[1, 1], [1, 1]], c: "#f0f000" },
+  { m: [[0, 1, 1], [1, 1, 0], [0, 0, 0]], c: "#00f000" },
+  { m: [[0, 1, 0], [1, 1, 1], [0, 0, 0]], c: "#a000f0" },
+  { m: [[1, 1, 0], [0, 1, 1], [0, 0, 0]], c: "#f00000" }
+];
+
+function createTetris(stage, api) {
+  const COLS = 10, ROWS = 20, CELL = 24, W = COLS * CELL, H = ROWS * CELL;
+  const wrap = document.createElement("div");
+  wrap.className = "tetris-wrap";
+  const top = document.createElement("div");
+  top.className = "tetris-top";
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  c.className = "game-canvas";
+  const next = document.createElement("canvas");
+  next.width = 96;
+  next.height = 96;
+  next.className = "game-canvas tetris-next";
+  top.appendChild(c);
+  const side = document.createElement("div");
+  side.className = "tetris-side";
+  side.innerHTML = "<div class='tetris-label'>Next</div>";
+  side.appendChild(next);
+  wrap.appendChild(top);
+  wrap.appendChild(side);
+  const pad = document.createElement("div");
+  pad.className = "game-pad";
+  pad.innerHTML = `
+    <button data-k="left">◀</button>
+    <button data-k="rotate">⟳</button>
+    <button data-k="down">⬇</button>
+    <button data-k="drop">⏬</button>
+    <button data-k="right">▶</button>
+  `;
+  wrap.appendChild(pad);
+  stage.appendChild(wrap);
+
+  const ctx = c.getContext("2d");
+  const nctx = next.getContext("2d");
+  let grid, bag, cur, nxt, score, lines, state, timer, alive;
+
+  function newBag() {
+    bag = [0, 1, 2, 3, 4, 5, 6];
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+  }
+
+  function takePiece() {
+    if (!bag.length) newBag();
+    const p = TETRIS_PIECES[bag.pop()];
+    return { m: p.m.map(r => r.slice()), c: p.c, x: 3, y: 0 };
+  }
+
+  function reset() {
+    grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    newBag();
+    cur = takePiece();
+    nxt = takePiece();
+    score = 0;
+    lines = 0;
+    state = "ready";
+    api.setScore(0);
+  }
+
+  function level() {
+    return Math.floor(lines / 10) + 1;
+  }
+
+  function speed() {
+    return Math.max(70, 600 - (level() - 1) * 50);
+  }
+
+  function collides(m, px, py) {
+    for (let y = 0; y < m.length; y++) {
+      for (let x = 0; x < m[y].length; x++) {
+        if (!m[y][x]) continue;
+        const bx = px + x, by = py + y;
+        if (bx < 0 || bx >= COLS || by >= ROWS) return true;
+        if (by >= 0 && grid[by][bx]) return true;
+      }
+    }
+    return false;
+  }
+
+  function rotateMatrix(m) {
+    const n = m.length;
+    return m.map((row, i) => row.map((_, j) => m[n - 1 - j][i]));
+  }
+
+  function tryRotate() {
+    if (cur.m.length === 2) return; // O piece
+    const r = rotateMatrix(cur.m);
+    for (const dx of [0, -1, 1, -2, 2]) {
+      if (!collides(r, cur.x + dx, cur.y)) {
+        cur.m = r;
+        cur.x += dx;
+        return;
+      }
+    }
+  }
+
+  function stepDown() {
+    if (!collides(cur.m, cur.x, cur.y + 1)) {
+      cur.y++;
+      return true;
+    }
+    lockPiece();
+    return false;
+  }
+
+  function hardDrop() {
+    while (stepDown()) { /* fall through */ }
+  }
+
+  function lockPiece() {
+    for (let y = 0; y < cur.m.length; y++) {
+      for (let x = 0; x < cur.m[y].length; x++) {
+        if (!cur.m[y][x]) continue;
+        const by = cur.y + y;
+        if (by < 0) {
+          die();
+          return;
+        }
+        grid[by][cur.x + x] = cur.c;
+      }
+    }
+    let cleared = 0;
+    for (let y = ROWS - 1; y >= 0; y--) {
+      if (grid[y].every(v => v)) {
+        grid.splice(y, 1);
+        grid.unshift(Array(COLS).fill(null));
+        cleared++;
+        y++;
+      }
+    }
+    if (cleared > 0) {
+      lines += cleared;
+      score += [0, 100, 300, 500, 800][cleared] * level();
+      api.setScore(score);
+    }
+    cur = nxt;
+    nxt = takePiece();
+    if (collides(cur.m, cur.x, cur.y)) die();
+  }
+
+  function die() {
+    state = "over";
+    api.gameOver(score);
+  }
+
+  function tick() {
+    if (!alive) return;
+    if (state === "play") stepDown();
+    draw();
+    timer = setTimeout(tick, speed());
+  }
+
+  function drawCell(g, x, y, color) {
+    g.fillStyle = color;
+    g.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+  }
+
+  function draw() {
+    ctx.fillStyle = "#0f0f13";
+    ctx.fillRect(0, 0, W, H);
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (grid[y][x]) drawCell(ctx, x, y, grid[y][x]);
+      }
+    }
+    cur.m.forEach((row, y) => row.forEach((v, x) => {
+      if (v && cur.y + y >= 0) drawCell(ctx, cur.x + x, cur.y + y, cur.c);
+    }));
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 16px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(`Lv ${level()}  Lines ${lines}`, 8, 20);
+    nctx.fillStyle = "#0f0f13";
+    nctx.fillRect(0, 0, 96, 96);
+    const nm = nxt.m;
+    const scale = nm.length === 4 ? 20 : 24;
+    const offX = (96 - nm.length * scale) / 2;
+    const offY = (96 - nm.length * scale) / 2;
+    nctx.fillStyle = nxt.c;
+    nm.forEach((row, y) => row.forEach((v, x) => {
+      if (v) nctx.fillRect(offX + x * scale + 1, offY + y * scale + 1, scale - 2, scale - 2);
+    }));
+    if (state === "ready") overlayText(ctx, W, H, ["Ready", "Tap / Space to start"]);
+    else if (state === "over") overlayText(ctx, W, H, ["Game Over", `Score: ${score}`, "Tap to restart"]);
+  }
+
+  function press() {
+    if (!alive) return;
+    if (state === "over") {
+      reset();
+      state = "play";
+    } else if (state === "ready") {
+      state = "play";
+    } else {
+      tryRotate();
+    }
+  }
+
+  function move(dx) {
+    if (!alive) return;
+    if (state !== "play") {
+      press();
+      return;
+    }
+    if (!collides(cur.m, cur.x + dx, cur.y)) cur.x += dx;
+  }
+
+  function down() {
+    if (!alive) return;
+    if (state !== "play") {
+      press();
+      return;
+    }
+    stepDown();
+    draw();
+  }
+
+  function onKey(e) {
+    if (e.code === "ArrowLeft" || e.code === "KeyA") { e.preventDefault(); move(-1); }
+    else if (e.code === "ArrowRight" || e.code === "KeyD") { e.preventDefault(); move(1); }
+    else if (e.code === "ArrowDown" || e.code === "KeyS") { e.preventDefault(); down(); }
+    else if (e.code === "ArrowUp" || e.code === "KeyX" || e.code === "KeyW") { e.preventDefault(); press(); }
+    else if (e.code === "Space") {
+      e.preventDefault();
+      if (state === "play") {
+        hardDrop();
+        draw();
+      } else press();
+    }
+  }
+
+  let touchStart = null;
+  function onTouchStart(e) {
+    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  function onTouchEnd(e) {
+    if (!touchStart) return;
+    const dx = e.changedTouches[0].clientX - touchStart.x;
+    const dy = e.changedTouches[0].clientY - touchStart.y;
+    touchStart = null;
+    if (Math.abs(dx) < 24 && Math.abs(dy) < 24) {
+      press();
+      return;
+    }
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : -1);
+    else if (dy > 0) down();
+  }
+
+  pad.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const k = btn.dataset.k;
+      if (k === "left") move(-1);
+      else if (k === "right") move(1);
+      else if (k === "rotate") press();
+      else if (k === "down") down();
+      else if (k === "drop") {
+        if (state === "play") {
+          hardDrop();
+          draw();
+        } else press();
+      }
+    });
+  });
+
+  reset();
+  alive = true;
+  c.addEventListener("touchstart", onTouchStart, { passive: true });
+  c.addEventListener("touchend", onTouchEnd);
+  window.addEventListener("keydown", onKey);
+  tick();
+
+  return {
+    destroy() {
+      alive = false;
+      clearTimeout(timer);
+      window.removeEventListener("keydown", onKey);
+      c.removeEventListener("touchstart", onTouchStart);
+      c.removeEventListener("touchend", onTouchEnd);
+    }
+  };
+}
+
+// ============ 2048 ============
+const TILE_COLORS = {
+  2: "#3a3a4a", 4: "#4a4a5e", 8: "#f07830", 16: "#f09040",
+  32: "#e05555", 64: "#d04040", 128: "#f0c060", 256: "#eeb040",
+  512: "#4ecdc4", 1024: "#3aa8e0", 2048: "#7c6cf0"
+};
+
+function create2048(stage, api) {
+  const N = 4, W = 400, CELL = W / N;
+  const c = makeCanvas(stage, W, W);
+  const ctx = c.getContext("2d");
+  let grid, score, state, alive;
+
+  function reset() {
+    grid = Array.from({ length: N }, () => Array(N).fill(0));
+    score = 0;
+    state = "ready";
+    spawn();
+    spawn();
+    api.setScore(0);
+  }
+
+  function emptyCells() {
+    const cells = [];
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (!grid[y][x]) cells.push({ x, y });
+      }
+    }
+    return cells;
+  }
+
+  function spawn() {
+    const cells = emptyCells();
+    if (!cells.length) return;
+    const cell = cells[Math.floor(Math.random() * cells.length)];
+    grid[cell.y][cell.x] = Math.random() < 0.9 ? 2 : 4;
+  }
+
+  function slide(row) {
+    const tiles = row.filter(v => v);
+    for (let i = 0; i < tiles.length - 1; i++) {
+      if (tiles[i] === tiles[i + 1]) {
+        tiles[i] *= 2;
+        score += tiles[i];
+        tiles.splice(i + 1, 1);
+      }
+    }
+    while (tiles.length < N) tiles.push(0);
+    return tiles;
+  }
+
+  function move(dx, dy) {
+    if (!alive) return;
+    if (state === "over") {
+      reset();
+      state = "play";
+      draw();
+      return;
+    }
+    if (state === "ready") state = "play";
+    const before = JSON.stringify(grid);
+    for (let i = 0; i < N; i++) {
+      if (dx === -1) grid[i] = slide(grid[i]);
+      else if (dx === 1) grid[i] = slide(grid[i].slice().reverse()).reverse();
+      else if (dy === -1) {
+        const col = slide([grid[0][i], grid[1][i], grid[2][i], grid[3][i]]);
+        for (let y = 0; y < N; y++) grid[y][i] = col[y];
+      } else if (dy === 1) {
+        const col = slide([grid[3][i], grid[2][i], grid[1][i], grid[0][i]]).reverse();
+        for (let y = 0; y < N; y++) grid[y][i] = col[y];
+      }
+    }
+    if (JSON.stringify(grid) === before) return;
+    api.setScore(score);
+    spawn();
+    draw();
+    if (!movesAvailable()) {
+      state = "over";
+      api.gameOver(score);
+      draw();
+    }
+  }
+
+  function movesAvailable() {
+    if (emptyCells().length) return true;
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if ((x + 1 < N && grid[y][x] === grid[y][x + 1]) ||
+            (y + 1 < N && grid[y][x] === grid[y + 1][x])) return true;
+      }
+    }
+    return false;
+  }
+
+  function draw() {
+    ctx.fillStyle = "#0f0f13";
+    ctx.fillRect(0, 0, W, W);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const v = grid[y][x];
+        ctx.fillStyle = v ? (TILE_COLORS[v] || "#7c6cf0") : "#1e1e28";
+        const px = x * CELL + 5, py = y * CELL + 5, s = CELL - 10;
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(px, py, s, s, 8);
+          ctx.fill();
+        } else {
+          ctx.fillRect(px, py, s, s);
+        }
+        if (v) {
+          ctx.fillStyle = "#fff";
+          ctx.font = `bold ${v < 100 ? 34 : v < 1000 ? 28 : 22}px 'Segoe UI', system-ui, sans-serif`;
+          ctx.fillText(v, x * CELL + CELL / 2, y * CELL + CELL / 2 + 1);
+        }
+      }
+    }
+    ctx.textBaseline = "alphabetic";
+    if (state === "ready") overlayText(ctx, W, W, ["Ready", "Arrows / WASD / swipe"]);
+    else if (state === "over") overlayText(ctx, W, W, ["Game Over", `Score: ${score}`, "Tap / Space to restart"]);
+  }
+
+  function onKey(e) {
+    if (e.code === "ArrowLeft" || e.code === "KeyA") { e.preventDefault(); move(-1, 0); }
+    else if (e.code === "ArrowRight" || e.code === "KeyD") { e.preventDefault(); move(1, 0); }
+    else if (e.code === "ArrowUp" || e.code === "KeyW") { e.preventDefault(); move(0, -1); }
+    else if (e.code === "ArrowDown" || e.code === "KeyS") { e.preventDefault(); move(0, 1); }
+    else if (e.code === "Space" && state === "over") {
+      e.preventDefault();
+      move(0, 0);
+    }
+  }
+
+  let touchStart = null;
+  function onTouchStart(e) {
+    touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  function onTouchEnd(e) {
+    if (!touchStart) return;
+    const dx = e.changedTouches[0].clientX - touchStart.x;
+    const dy = e.changedTouches[0].clientY - touchStart.y;
+    touchStart = null;
+    if (Math.abs(dx) < 24 && Math.abs(dy) < 24) {
+      if (state !== "play") move(0, 0);
+      return;
+    }
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : -1, 0);
+    else move(0, dy > 0 ? 1 : -1);
+  }
+
+  reset();
+  alive = true;
+  draw();
+  c.addEventListener("touchstart", onTouchStart, { passive: true });
+  c.addEventListener("touchend", onTouchEnd);
+  window.addEventListener("keydown", onKey);
+
+  return {
+    destroy() {
+      alive = false;
+      window.removeEventListener("keydown", onKey);
+      c.removeEventListener("touchstart", onTouchStart);
+      c.removeEventListener("touchend", onTouchEnd);
     }
   };
 }
