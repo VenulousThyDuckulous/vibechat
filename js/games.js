@@ -12,7 +12,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 // Coins per score point, per game (scores live on very different scales)
-const COIN_RATES = { flappy: 2, snake: 2, breakout: 0.1, memory: 0.05, wave: 1 };
+const COIN_RATES = { flappy: 2, snake: 2, breakout: 0.1, memory: 0.05, wave: 1, tetris: 0.02, game2048: 0.005, pong: 3 };
 
 let activeGame = null;
 
@@ -1450,11 +1450,181 @@ function create2048(stage, api) {
   };
 }
 
+// ============ PONG VS AI ============
+function createPong(stage, api) {
+  const W = 400, H = 520;
+  const c = makeCanvas(stage, W, H);
+  const ctx = c.getContext("2d");
+  const PW = 80, PH = 10, BR = 7, WIN_SCORE = 7;
+  let playerX, aiX, ball, playerScore, aiScore, state, raf, alive, keys, aiTarget;
+
+  function reset(full) {
+    playerX = W / 2;
+    aiX = W / 2;
+    if (full) {
+      playerScore = 0;
+      aiScore = 0;
+      api.setScore(0);
+    }
+    serve(playerScore >= aiScore ? 1 : -1);
+    state = full ? "ready" : state;
+  }
+
+  function serve(dirY) {
+    ball = { x: W / 2, y: H / 2, vx: (Math.random() < 0.5 ? -1 : 1) * 2.5, vy: 3.5 * dirY };
+    aiTarget = W / 2 + (Math.random() - 0.5) * 60;
+  }
+
+  function die(playerWonPoint) {
+    if (playerWonPoint) {
+      playerScore++;
+      api.setScore(playerScore);
+    } else {
+      aiScore++;
+    }
+    if (playerScore >= WIN_SCORE || aiScore >= WIN_SCORE) {
+      state = "over";
+      api.gameOver(playerScore);
+    } else {
+      serve(playerWonPoint ? -1 : 1);
+    }
+  }
+
+  function update() {
+    if (keys.has("left")) playerX = Math.max(PW / 2, playerX - 6);
+    if (keys.has("right")) playerX = Math.min(W - PW / 2, playerX + 6);
+    // AI tracks the ball with limited speed and aim error
+    if (ball.vy < 0) {
+      const diff = (aiTarget + (ball.x - aiTarget) * 0.4) - aiX;
+      aiX += Math.max(-3.2, Math.min(3.2, diff));
+      aiX = Math.max(PW / 2, Math.min(W - PW / 2, aiX));
+    }
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+    if (ball.x - BR < 0 || ball.x + BR > W) ball.vx *= -1;
+    // Player paddle (bottom)
+    if (ball.vy > 0 && ball.y + BR >= H - 30 && ball.y + BR <= H - 30 + PH + 6 &&
+        Math.abs(ball.x - playerX) <= PW / 2 + BR) {
+      const off = (ball.x - playerX) / (PW / 2);
+      ball.vx = off * 4.5;
+      ball.vy = -Math.abs(ball.vy) * 1.04;
+      ball.y = H - 30 - BR - 1;
+    }
+    // AI paddle (top)
+    if (ball.vy < 0 && ball.y - BR <= 30 && ball.y - BR >= 30 - PH - 6 &&
+        Math.abs(ball.x - aiX) <= PW / 2 + BR) {
+      const off = (ball.x - aiX) / (PW / 2);
+      ball.vx = off * 4.5;
+      ball.vy = Math.abs(ball.vy) * 1.04;
+      ball.y = 30 + BR + 1;
+    }
+    if (ball.y - BR > H) {
+      aiTarget = W / 2 + (Math.random() - 0.5) * 60;
+      die(false);
+    } else if (ball.y + BR < 0) {
+      aiTarget = W / 2 + (Math.random() - 0.5) * 60;
+      die(true);
+    }
+  }
+
+  function draw() {
+    ctx.fillStyle = "#0f0f13";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "#2a2a38";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.moveTo(0, H / 2);
+    ctx.lineTo(W, H / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#7c6cf0";
+    ctx.fillRect(aiX - PW / 2, 24 - PH / 2, PW, PH);
+    ctx.fillStyle = "#4ecdc4";
+    ctx.fillRect(playerX - PW / 2, H - 30 - PH / 2, PW, PH);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, BR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = "bold 40px 'Segoe UI', system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#9898b0";
+    ctx.fillText(aiScore, W / 2, H / 2 - 30);
+    ctx.fillText(playerScore, W / 2, H / 2 + 60);
+    if (state === "ready") overlayText(ctx, W, H, ["Ready", "First to 7 wins", "Tap to serve"]);
+    else if (state === "over") overlayText(ctx, W, H, [
+      playerScore > aiScore ? "You Win!" : "AI Wins",
+      `You ${playerScore} — ${aiScore} AI`,
+      "Tap to play again"
+    ]);
+  }
+
+  function loop() {
+    if (!alive) return;
+    if (state === "play") update();
+    draw();
+    raf = requestAnimationFrame(loop);
+  }
+
+  function press() {
+    if (!alive) return;
+    if (state === "over") {
+      reset(true);
+      state = "play";
+    } else if (state === "ready") {
+      state = "play";
+    }
+  }
+
+  function onKeyDown(e) {
+    if (e.code === "ArrowLeft" || e.code === "KeyA") { keys.add("left"); e.preventDefault(); }
+    if (e.code === "ArrowRight" || e.code === "KeyD") { keys.add("right"); e.preventDefault(); }
+    if (e.code === "Space") { e.preventDefault(); press(); }
+  }
+  function onKeyUp(e) {
+    if (e.code === "ArrowLeft" || e.code === "KeyA") keys.delete("left");
+    if (e.code === "ArrowRight" || e.code === "KeyD") keys.delete("right");
+  }
+  function onPointer(e) {
+    const rect = c.getBoundingClientRect();
+    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
+    if (clientX == null) {
+      press();
+      return;
+    }
+    playerX = Math.max(PW / 2, Math.min(W - PW / 2, (clientX - rect.left) * (W / rect.width)));
+    if (state !== "play") press();
+  }
+
+  reset(true);
+  alive = true;
+  keys = new Set();
+  c.addEventListener("pointerdown", onPointer);
+  c.addEventListener("pointermove", (e) => {
+    if (e.buttons > 0 || e.pointerType === "touch") onPointer(e);
+  });
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
+  loop();
+
+  return {
+    destroy() {
+      alive = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    }
+  };
+}
+
 const GAMES = {
   wave: { name: "Wave", icon: "🌊", create: createWave },
   flappy: { name: "Flappy Bird", icon: "🐤", create: createFlappy },
   snake: { name: "Snake", icon: "🐍", create: createSnake },
   breakout: { name: "Breakout", icon: "🧱", create: createBreakout },
   memory: { name: "Memory Match", icon: "🃏", create: createMemory },
-  gba: { name: "GBA Emulator", icon: "🕹️", create: createGba }
+  gba: { name: "GBA Emulator", icon: "🕹️", create: createGba },
+  tetris: { name: "Tetris", icon: "🟪", create: createTetris },
+  game2048: { name: "2048", icon: "🔢", create: create2048 },
+  pong: { name: "Pong", icon: "🏓", create: createPong }
 };

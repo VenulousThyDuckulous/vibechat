@@ -1756,6 +1756,59 @@ input::placeholder {
   min-height: 1.2em;
 }
 
+/* ============ TETRIS + GAME CONTROLS ============ */
+.tetris-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.tetris-top {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.tetris-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.tetris-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tetris-next {
+  max-width: 96px;
+}
+
+.game-pad {
+  display: flex;
+  gap: 8px;
+}
+
+.game-pad button {
+  width: 52px;
+  height: 52px;
+  font-size: 1.3rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.game-pad button:active {
+  background: var(--accent);
+}
+
 #emu-holder {
   width: 100%;
   max-width: 640px;
