@@ -329,6 +329,40 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function dayKey(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function dayLabel(ts) {
+  const now = new Date();
+  const d = new Date(ts);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfThatDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfToday - startOfThatDay) / 86400000);
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return d.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" })
+  });
+}
+
+// Date divider between messages from different days ("Today" for the
+// first message even on a fresh load — no reset bookkeeping needed).
+function maybeInsertDayDivider(container, ts) {
+  const time = Number(ts) || Date.now();
+  const key = dayKey(time);
+  const lastDay = container.querySelector(".message") ? container.dataset.lastDay : null;
+  if (lastDay === key) return;
+  container.dataset.lastDay = key;
+  const div = document.createElement("div");
+  div.className = "day-divider";
+  div.innerHTML = `<span>${dayLabel(time)}</span>`;
+  container.appendChild(div);
+}
+
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
@@ -1157,6 +1191,7 @@ function loadMessages(roomId) {
 
 function appendMessage(msgId, msg) {
   const container = $("messages");
+  maybeInsertDayDivider(container, msg.timestamp);
   const isOwn = msg.uid === currentUser.uid;
   const div = document.createElement("div");
   div.className = `message ${isOwn ? "own" : "other"}`;
@@ -2306,6 +2341,7 @@ function closeAnnouncements() {
 function appendAnnouncement(msgId, msg) {
   const container = $("ann-messages");
   if (!msg || container.querySelector(`[data-msg-id="${msgId}"]`)) return;
+  maybeInsertDayDivider(container, msg.timestamp);
   const div = document.createElement("div");
   div.className = "message other";
   div.dataset.msgId = msgId;
@@ -2897,6 +2933,7 @@ function appendDmMessage(msgId, msg) {
   if (!msg) return;
   const container = $("dm-messages");
   if (container.querySelector(`[data-msg-id="${msgId}"]`)) return;
+  maybeInsertDayDivider(container, msg.timestamp);
   const isOwn = msg.uid === currentUser.uid;
   const div = document.createElement("div");
   div.className = `message ${isOwn ? "own" : "other"}`;
