@@ -174,7 +174,7 @@ function createWave(stage, api) {
       last = { x: last.x + 8, top: gapY - gapHalf, bottom: gapY + gapHalf };
       segs.push(last);
     }
-    py += holding ? -3.4 : 3.4;
+    py += holding ? -speed : speed; // true GD 45° angles at any speed
     trail.push({ x: PX, y: py });
     if (trail.length > 42) trail.shift();
     const score = Math.floor(dist / 50);
@@ -195,9 +195,13 @@ function createWave(stage, api) {
   }
 
   function draw() {
-    ctx.fillStyle = "#0f0f13";
+    // Deep-space background with a faint blue grid
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#070b18");
+    bg.addColorStop(1, "#04060d");
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "rgba(124,108,240,0.12)";
+    ctx.strokeStyle = "rgba(0, 140, 255, 0.10)";
     ctx.lineWidth = 1;
     const off = -(dist % 40);
     ctx.beginPath();
@@ -205,8 +209,15 @@ function createWave(stage, api) {
       ctx.moveTo(x, 0);
       ctx.lineTo(x, H);
     }
+    for (let y = 0; y < H; y += 40) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+    }
     ctx.stroke();
-    ctx.fillStyle = "#1e1e28";
+    // Solid GD-style blocks with a soft glow
+    ctx.fillStyle = "#f2f5ff";
+    ctx.shadowColor = "rgba(160, 200, 255, 0.55)";
+    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.moveTo(-8, -8);
     for (const s of segs) ctx.lineTo(s.x, s.top);
@@ -219,23 +230,40 @@ function createWave(stage, api) {
     ctx.lineTo(W + 8, H + 8);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = "#e055e0";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    segs.forEach((s, i) => (i === 0 ? ctx.moveTo(s.x, s.top) : ctx.lineTo(s.x, s.top)));
-    ctx.stroke();
-    ctx.beginPath();
-    segs.forEach((s, i) => (i === 0 ? ctx.moveTo(s.x, s.bottom) : ctx.lineTo(s.x, s.bottom)));
-    ctx.stroke();
-    for (let i = 0; i < trail.length; i++) {
-      const t = trail[i];
-      ctx.fillStyle = `rgba(78,205,196,${(i / trail.length) * 0.8})`;
-      ctx.fillRect(t.x - 2, t.y - 2, 4, 4);
+    ctx.shadowBlur = 0;
+    // Glowing trail ribbon, fading toward the tail
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 1; i < trail.length; i++) {
+      ctx.strokeStyle = `rgba(0, 229, 255, ${(i / trail.length) * 0.85})`;
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+      ctx.lineTo(trail[i].x, trail[i].y);
+      ctx.stroke();
     }
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(PX - 6, py - 6, 12, 12);
-    ctx.fillStyle = "#4ecdc4";
-    ctx.fillRect(PX - 4, py - 4, 8, 8);
+    // Arrow player that flips with direction, white core + cyan glow
+    const dir = holding ? -1 : 1;
+    ctx.save();
+    ctx.translate(PX, py);
+    ctx.shadowColor = "#00e5ff";
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    if (dir < 0) {
+      ctx.moveTo(11, -4);
+      ctx.lineTo(-9, -12);
+      ctx.lineTo(-4, 0);
+      ctx.lineTo(-9, 12);
+    } else {
+      ctx.moveTo(11, 4);
+      ctx.lineTo(-9, 12);
+      ctx.lineTo(-4, 0);
+      ctx.lineTo(-9, -12);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
     if (state === "ready") overlayText(ctx, W, H, ["Get Ready", "Hold to rise, release to fall"]);
     else if (state === "over") overlayText(ctx, W, H, ["Wrecked", `Score: ${lastScore}`, "Hold to retry"]);
   }
