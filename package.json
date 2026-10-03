@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "description": "A chill real-time chat room app powered by Firebase, deployed to GitHub Pages.",
   "type": "module",
+  "main": "main.cjs",
   "scripts": {
     "start": "npx serve .",
-    "deploy": "git push origin main"
+    "deploy": "git push origin main",
+    "electron": "electron .",
+    "dist": "node build-desktop.cjs"
   },
   "keywords": ["chat", "firebase", "github-pages", "realtime"],
   "license": "MIT"
