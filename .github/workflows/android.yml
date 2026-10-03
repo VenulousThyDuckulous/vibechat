@@ -1,0 +1,58 @@
+name: Android APK
+
+# Free cloud build for the Android app (no store needed — sideload the APK).
+# Trigger: Actions tab → Android APK → Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-34" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Sync web assets
+        run: npm run cap:sync
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+        working-directory: android
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibeChat-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Attach to android-latest release
+        run: |
+          TAG=android-latest
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "VibeChat Android (latest)" --notes "Auto-built debug APK. Sideload to install — allow unknown apps when prompted. Rebuilt on demand from the Actions tab."
+          gh release upload "$TAG" android/app/build/outputs/apk/debug/app-debug.apk --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,6 +1,6 @@
 {
   "name": "vibechat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A chill real-time chat room app powered by Firebase, deployed to GitHub Pages.",
   "type": "module",
   "main": "main.cjs",
@@ -8,7 +8,9 @@
     "start": "npx serve .",
     "deploy": "git push origin main",
     "electron": "electron .",
-    "dist": "node build-desktop.cjs"
+    "dist": "node build-desktop.cjs",
+    "cap:sync-www": "node scripts/sync-www.cjs",
+    "cap:sync": "npm run cap:sync-www && cap sync android"
   },
   "keywords": [
     "chat",
@@ -18,7 +20,12 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@electron/packager": "^20.3.0",
-    "electron": "^44.5.1"
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "electron-updater": "^6.8.9"
   }
 }

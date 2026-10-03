@@ -6,8 +6,9 @@ A chill place to hang out and chat in real time.
 
 ## Get the app
 
-- **Phone/tablet:** open the site in your browser → Android: ⋮ → "Add to Home screen" (or "Install app") · iPhone: Share → "Add to Home Screen". Runs fullscreen like a native app, no app store needed.
-- **Windows:** download `VibeChat-windows.zip` from the [releases page](https://github.com/VenulousThyDuckulous/vibechat/releases), unzip, run `VibeChat.exe`. No install needed.
+- **Phone/tablet:** open the site in your browser → Android: ⋮ → "Add to Home screen" (or "Install app") · iPhone: Share → "Add to Home Screen". Runs fullscreen like a native app, no app store needed. Always up to date automatically.
+- **Android (APK):** grab the APK from the [android-latest release](https://github.com/VenulousThyDuckulous/vibechat/releases/tag/android-latest) (built on demand from the Actions tab → Android APK → Run workflow). Sideload to install. Loads the live site, so it's always current.
+- **Windows:** download the portable exe from the [releases page](https://github.com/VenulousThyDuckulous/vibechat/releases) and run it — no install needed. It auto-updates itself on launch.
 
 ## How to use
 

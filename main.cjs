@@ -2,6 +2,13 @@
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
 
+let updateCheck = null;
+try {
+  updateCheck = require("electron-updater").autoUpdater;
+} catch (e) {
+  updateCheck = null;
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
@@ -24,6 +31,17 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+  // Auto-update from GitHub Releases (Windows portable build)
+  try {
+    if (updateCheck) {
+      updateCheck.setFeedURL({ provider: "github", owner: "VenulousThyDuckulous", repo: "vibechat" });
+      setTimeout(() => {
+        updateCheck.checkForUpdatesAndNotify().catch(() => {});
+      }, 15000);
+    }
+  } catch (e) {
+    /* dev mode or offline — skip silently */
+  }
 });
 
 app.on("window-all-closed", () => {

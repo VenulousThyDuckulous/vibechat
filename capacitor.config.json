@@ -1,0 +1,8 @@
+{
+  "appId": "com.venulous.vibechat",
+  "appName": "VibeChat",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
