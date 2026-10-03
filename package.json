@@ -10,6 +10,15 @@
     "electron": "electron .",
     "dist": "node build-desktop.cjs"
   },
-  "keywords": ["chat", "firebase", "github-pages", "realtime"],
-  "license": "MIT"
+  "keywords": [
+    "chat",
+    "firebase",
+    "github-pages",
+    "realtime"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.5.1"
+  }
 }

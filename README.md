@@ -4,6 +4,11 @@ A chill place to hang out and chat in real time.
 
 **Live at: https://venulousthyduckulous.github.io/vibechat/**
 
+## Get the app
+
+- **Phone/tablet:** open the site in your browser → Android: ⋮ → "Add to Home screen" (or "Install app") · iPhone: Share → "Add to Home Screen". Runs fullscreen like a native app, no app store needed.
+- **Windows:** download `VibeChat-windows.zip` from the [releases page](https://github.com/VenulousThyDuckulous/vibechat/releases), unzip, run `VibeChat.exe`. No install needed.
+
 ## How to use
 
 1. **Sign up** — pick a username and password.

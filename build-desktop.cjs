@@ -1,6 +1,6 @@
 // Builds dist/VibeChat-win32-x64 (portable folder with VibeChat.exe).
 // Run: npm run dist
-const packager = require("@electron/packager");
+const { packager } = require("@electron/packager");
 
 packager({
   dir: ".",
